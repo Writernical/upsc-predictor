@@ -1,12 +1,14 @@
 """
-UPSC MULTI-ANGLE PREDICTOR v5.0
+UPSC MULTI-ANGLE PREDICTOR v5.1
 ================================
-Simple pay-per-use: ₹15 = 10 Questions
-UPI + Access Code system (Razorpay coming soon)
+Access code system — no free trial on refresh
+Free trial via shareable FREE-XXXX codes
+Paid queries via UPSC-XXXX codes
 
 STREAMLIT SECRETS NEEDED:
     ANTHROPIC_API_KEY = "sk-ant-..."
-    CREDIT_CODES = "UPSC-79CV,UPSC-ID5E,..."   (50 one-time codes)
+    CREDIT_CODES = "UPSC-79CV,UPSC-ID5E,..."
+    FREE_CODES = "FREE-7ZAV,FREE-3945,..."
 """
 
 import streamlit as st
@@ -38,8 +40,6 @@ st.markdown("""
     .problem-box p { margin: 0; color: #7f1d1d; }
     .insight-box { background: #fffbeb; border-left: 4px solid #fbbf24; padding: 1.2rem; margin: 1rem 0; border-radius: 0 8px 8px 0; }
     .insight-box p { margin: 0; color: #78350f; }
-    .free-banner { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 1rem; border-radius: 10px; text-align: center; margin: 1rem 0; }
-    .free-banner h3 { margin: 0; font-size: 1.1rem; }
     .paid-banner { background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); color: white; padding: 1rem; border-radius: 10px; text-align: center; margin: 1rem 0; }
     .paid-banner h3 { margin: 0; font-size: 1.1rem; }
     .pay-box { background: #fffbeb; border: 2px solid #f59e0b; border-radius: 12px; padding: 2rem; text-align: center; margin: 2rem 0; }
@@ -50,6 +50,7 @@ st.markdown("""
     .feature-card p { margin: 0; color: #64748b; font-size: 0.85rem; line-height: 1.5; }
     .output-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.5rem; margin: 1rem 0; }
     .upi-box { background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 1rem; margin-top: 1rem; text-align: center; }
+    .code-box { background: #f0f9ff; border: 2px solid #38bdf8; border-radius: 12px; padding: 1.5rem; text-align: center; margin: 1.5rem 0; }
     .footer { text-align: center; padding: 2rem 1rem; color: #94a3b8; font-size: 0.85rem; border-top: 1px solid #e2e8f0; margin-top: 2rem; }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -61,27 +62,34 @@ st.markdown("""
 # FUNCTIONS
 # =============================================================================
 
-def get_valid_codes():
-    """Load valid credit codes from Streamlit secrets."""
+def get_all_valid_codes():
+    """Load all valid codes (paid + free) from Streamlit secrets."""
+    all_codes = set()
     try:
-        codes_str = st.secrets["CREDIT_CODES"]
-        return set(code.strip() for code in codes_str.split(",") if code.strip())
+        codes_str = st.secrets.get("CREDIT_CODES", "")
+        all_codes.update(code.strip() for code in codes_str.split(",") if code.strip())
     except (KeyError, FileNotFoundError):
-        return set()
+        pass
+    try:
+        free_str = st.secrets.get("FREE_CODES", "")
+        all_codes.update(code.strip() for code in free_str.split(",") if code.strip())
+    except (KeyError, FileNotFoundError):
+        pass
+    return all_codes
 
 
 def validate_access_code(code):
     """Check if access code is valid and unused."""
     code = code.strip().upper()
-    valid_codes = get_valid_codes()
+    valid_codes = get_all_valid_codes()
     
     if code not in valid_codes:
-        return False, "❌ Invalid code. Check and try again."
+        return False, "❌ Invalid code. Please check and try again."
     
     if code in st.session_state.used_codes:
         return False, "❌ This code has already been used."
     
-    return True, "✅ Code accepted!"
+    return True, "✅ Code accepted! You have 1 query ready."
 
 
 def generate_questions(topic):
@@ -227,7 +235,7 @@ RULES:
 
 
 def show_payment_section():
-    """Display UPI payment + access code redemption."""
+    """Display UPI payment instructions."""
     st.markdown("""
     <div class="pay-box">
         <h3>☕ ₹15 — That's less than your chai</h3>
@@ -238,7 +246,6 @@ def show_payment_section():
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # Step 1: UPI Payment
         st.markdown("#### Step 1: Pay ₹15 via UPI")
         st.markdown('<div class="upi-box"><p style="margin:0; color:#166534;"><strong>UPI ID</strong></p></div>', unsafe_allow_html=True)
         st.code("writernical@sbi", language=None)
@@ -250,14 +257,21 @@ def show_payment_section():
             use_container_width=True
         )
         st.caption("You'll receive an access code within 15 minutes.")
-        
-        # Step 3: Enter Access Code
-        st.markdown("---")
-        st.markdown("#### Step 3: Enter Your Access Code")
-        
+
+
+def show_code_entry():
+    """Display the access code entry box."""
+    st.markdown("""
+    <div class="code-box">
+        <p style="margin:0; color:#0369a1; font-size: 1rem;"><strong>🔑 Have a code? Enter below to unlock your questions.</strong></p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
         code_input = st.text_input(
             "access_code",
-            placeholder="e.g. UPSC-79CV",
+            placeholder="e.g. UPSC-79CV or FREE-7ZAV",
             label_visibility="collapsed",
             max_chars=10
         )
@@ -281,13 +295,10 @@ def show_payment_section():
 # =============================================================================
 
 if 'credits' not in st.session_state:
-    st.session_state.credits = 1
+    st.session_state.credits = 0  # No free credit on load
 
 if 'total_queries' not in st.session_state:
     st.session_state.total_queries = 0
-
-if 'free_used' not in st.session_state:
-    st.session_state.free_used = False
 
 if 'just_paid' not in st.session_state:
     st.session_state.just_paid = False
@@ -303,10 +314,7 @@ if 'used_codes' not in st.session_state:
 with st.sidebar:
     st.markdown("### Your Session")
     if st.session_state.credits > 0:
-        if not st.session_state.free_used:
-            st.success("🎁 **1 FREE query** available!")
-        else:
-            st.success(f"✅ **{st.session_state.credits}** query ready")
+        st.success(f"✅ **{st.session_state.credits}** query ready")
     else:
         st.warning("⚡ No queries left")
     st.markdown(f"Queries used: **{st.session_state.total_queries}**")
@@ -331,16 +339,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# Status banners
+# Status banner
 if st.session_state.just_paid:
-    st.markdown('<div class="paid-banner"><h3>✅ Payment verified! Enter your topic below.</h3></div>', unsafe_allow_html=True)
+    st.markdown('<div class="paid-banner"><h3>✅ Code redeemed! Enter your topic below.</h3></div>', unsafe_allow_html=True)
     st.session_state.just_paid = False
-elif not st.session_state.free_used:
-    st.markdown('<div class="free-banner"><h3>🎁 Try FREE — Your first query is on us. No signup needed.</h3></div>', unsafe_allow_html=True)
 
 
 # =============================================================================
-# PROBLEM + FEATURES (first visit only)
+# PROBLEM + FEATURES (show when no queries done yet)
 # =============================================================================
 
 if st.session_state.total_queries == 0:
@@ -370,18 +376,18 @@ if st.session_state.total_queries == 0:
 
 
 # =============================================================================
-# MAIN: INPUT + GENERATE  or  PAYMENT
+# MAIN: CODE ENTRY → INPUT → GENERATE  or  PAYMENT
 # =============================================================================
 
 st.markdown("---")
 
+# Always show the code entry box at top
+show_code_entry()
+
 if st.session_state.credits > 0:
     # ── HAS CREDITS: SHOW INPUT ──
-    
-    if not st.session_state.free_used:
-        st.markdown("### 🎁 Try Your FREE Query")
-    else:
-        st.markdown("### Enter Any Current Affairs Topic")
+    st.markdown("---")
+    st.markdown("### Enter Any Current Affairs Topic")
     
     topic_text = st.text_area(
         "topic",
@@ -392,8 +398,7 @@ if st.session_state.credits > 0:
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        btn = "🎁 Generate FREE — 10 Questions" if not st.session_state.free_used else "🚀 Generate 10 Questions"
-        clicked = st.button(btn, use_container_width=True, type="primary")
+        clicked = st.button("🚀 Generate 10 Questions", use_container_width=True, type="primary")
     
     if clicked:
         if not topic_text or len(topic_text.strip()) < 5:
@@ -403,8 +408,6 @@ if st.session_state.credits > 0:
             if output:
                 st.session_state.credits -= 1
                 st.session_state.total_queries += 1
-                if not st.session_state.free_used:
-                    st.session_state.free_used = True
                 
                 st.markdown("---")
                 st.markdown("## ✅ Your Practice Questions")
@@ -424,6 +427,7 @@ if st.session_state.credits > 0:
                 st.balloons()
 else:
     # ── NO CREDITS: SHOW PAYMENT ──
+    st.markdown("---")
     show_payment_section()
 
 
