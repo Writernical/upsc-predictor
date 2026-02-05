@@ -373,6 +373,15 @@ if st.session_state.total_queries == 0:
         st.markdown('<div class="feature-card"><h4>🪤 Real Exam Traps</h4><p>"Always", "Only", "All of the above" — UPSC MCQs have patterns. Built from 1,400+ previous year questions.</p></div>', unsafe_allow_html=True)
     with c3:
         st.markdown('<div class="feature-card"><h4>📋 Answer Frameworks</h4><p>Word allocation, must-include cases, committees, articles — and balanced conclusions that examiners want to see.</p></div>', unsafe_allow_html=True)
+    
+    # Free trial codes
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 1.2rem; border-radius: 10px; text-align: center; margin: 1.5rem 0;">
+        <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem;">🎁 Try it FREE — use one of these codes below</h3>
+        <p style="margin: 0; font-size: 1.3rem; font-weight: 700; letter-spacing: 2px;">FREE-7ZAV &nbsp; &nbsp; FREE-3945</p>
+        <p style="margin: 0.5rem 0 0 0; font-size: 0.85rem; opacity: 0.9;">Limited codes • First come, first served</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # =============================================================================
