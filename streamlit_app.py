@@ -1,20 +1,28 @@
 """
-UPSC MULTI-ANGLE PREDICTOR v5.1
+UPSC MULTI-ANGLE PREDICTOR v6.0
 ================================
-Access code system — no free trial on refresh
-Free trial via shareable FREE-XXXX codes
-Paid queries via UPSC-XXXX codes
+Supabase database + Razorpay payments
+- Used codes tracked in database (no refresh exploit)
+- Razorpay auto-payment with instant credit
 
 STREAMLIT SECRETS NEEDED:
     ANTHROPIC_API_KEY = "sk-ant-..."
     CREDIT_CODES = "UPSC-79CV,UPSC-ID5E,..."
     FREE_CODES = "FREE-7ZAV,FREE-3945,..."
+    SUPABASE_URL = "https://xxxxx.supabase.co"
+    SUPABASE_KEY = "eyJhbG..."
+    RAZORPAY_KEY_ID = "rzp_test_xxxxx"
+    RAZORPAY_KEY_SECRET = "xxxxxxxxxxxxx"
+    RAZORPAY_PAYMENT_URL = "https://rzp.io/rzp/xxxxx"
 """
 
 import streamlit as st
 import anthropic
+import hmac
+import hashlib
 import os
 from datetime import datetime
+from supabase import create_client
 
 # =============================================================================
 # PAGE CONFIG
@@ -25,6 +33,22 @@ st.set_page_config(
     page_icon="📰",
     layout="wide"
 )
+
+# =============================================================================
+# SUPABASE CLIENT
+# =============================================================================
+
+@st.cache_resource
+def get_supabase_client():
+    """Initialize Supabase client (cached)."""
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except Exception:
+        return None
+
+supabase = get_supabase_client()
 
 # =============================================================================
 # CSS
@@ -59,7 +83,122 @@ st.markdown("""
 
 
 # =============================================================================
-# FUNCTIONS
+# DATABASE FUNCTIONS
+# =============================================================================
+
+def is_code_used(code: str) -> bool:
+    """Check if a code has been used (in database)."""
+    if not supabase:
+        return code in st.session_state.get('used_codes', set())
+    
+    try:
+        result = supabase.table('used_codes').select('code').eq('code', code).execute()
+        return len(result.data) > 0
+    except Exception:
+        return code in st.session_state.get('used_codes', set())
+
+
+def mark_code_used(code: str) -> bool:
+    """Mark a code as used in database."""
+    if not supabase:
+        st.session_state.setdefault('used_codes', set()).add(code)
+        return True
+    
+    try:
+        supabase.table('used_codes').insert({'code': code}).execute()
+        return True
+    except Exception:
+        return False
+
+
+def is_payment_processed(payment_id: str) -> bool:
+    """Check if a Razorpay payment has already been processed."""
+    if not supabase:
+        return payment_id in st.session_state.get('processed_payments', set())
+    
+    try:
+        result = supabase.table('payments').select('razorpay_payment_id').eq('razorpay_payment_id', payment_id).execute()
+        return len(result.data) > 0
+    except Exception:
+        return payment_id in st.session_state.get('processed_payments', set())
+
+
+def record_payment(payment_id: str, signature: str, amount: int = 15) -> bool:
+    """Record a successful payment in database."""
+    if not supabase:
+        st.session_state.setdefault('processed_payments', set()).add(payment_id)
+        return True
+    
+    try:
+        supabase.table('payments').insert({
+            'razorpay_payment_id': payment_id,
+            'razorpay_signature': signature,
+            'amount': amount,
+            'status': 'success'
+        }).execute()
+        return True
+    except Exception:
+        return False
+
+
+# =============================================================================
+# PAYMENT VERIFICATION
+# =============================================================================
+
+def verify_razorpay_signature(payment_link_id: str, payment_link_ref_id: str, 
+                               payment_link_status: str, razorpay_payment_id: str,
+                               signature: str) -> bool:
+    """Verify Razorpay payment signature."""
+    try:
+        secret = st.secrets["RAZORPAY_KEY_SECRET"]
+    except (KeyError, FileNotFoundError):
+        return True
+    
+    message = f"{payment_link_id}|{payment_link_ref_id}|{payment_link_status}|{razorpay_payment_id}"
+    
+    expected = hmac.new(
+        secret.encode(),
+        message.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(expected, signature)
+
+
+def process_razorpay_return():
+    """Process Razorpay redirect after payment."""
+    params = st.query_params
+    
+    if 'razorpay_payment_id' not in params:
+        return False
+    
+    payment_id = params.get('razorpay_payment_id', '')
+    signature = params.get('razorpay_signature', '')
+    link_id = params.get('razorpay_payment_link_id', '')
+    ref_id = params.get('razorpay_payment_link_reference_id', '')
+    status = params.get('razorpay_payment_link_status', '')
+    
+    if is_payment_processed(payment_id):
+        st.query_params.clear()
+        return False
+    
+    if not verify_razorpay_signature(link_id, ref_id, status, payment_id, signature):
+        st.error("Payment verification failed. Contact support on WhatsApp.")
+        st.query_params.clear()
+        return False
+    
+    if record_payment(payment_id, signature):
+        st.session_state.credits = st.session_state.get('credits', 0) + 1
+        st.session_state.just_paid = True
+        st.query_params.clear()
+        return True
+    
+    st.query_params.clear()
+    return False
+
+
+# =============================================================================
+# CODE VALIDATION
 # =============================================================================
 
 def get_all_valid_codes():
@@ -86,11 +225,15 @@ def validate_access_code(code):
     if code not in valid_codes:
         return False, "❌ Invalid code. Please check and try again."
     
-    if code in st.session_state.used_codes:
+    if is_code_used(code):
         return False, "❌ This code has already been used."
     
-    return True, "✅ Code accepted! You have 1 query ready."
+    return True, "✅ Code accepted!"
 
+
+# =============================================================================
+# QUESTION GENERATION
+# =============================================================================
 
 def generate_questions(topic):
     """Generate 10 UPSC questions using Claude API."""
@@ -234,8 +377,12 @@ RULES:
         return None
 
 
+# =============================================================================
+# UI COMPONENTS
+# =============================================================================
+
 def show_payment_section():
-    """Display UPI payment instructions."""
+    """Display Razorpay payment + UPI fallback."""
     st.markdown("""
     <div class="pay-box">
         <h3>☕ ₹15 — That's less than your chai</h3>
@@ -246,17 +393,25 @@ def show_payment_section():
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("#### Step 1: Pay ₹15 via UPI")
+        try:
+            razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
+            st.link_button("💳 Pay ₹15 — Instant Access", razorpay_url, use_container_width=True, type="primary")
+            st.caption("Secure payment via Razorpay • UPI, Cards, Net Banking")
+        except (KeyError, FileNotFoundError):
+            pass
+        
+        st.markdown("---")
+        st.markdown("##### Or pay manually via UPI")
         st.markdown('<div class="upi-box"><p style="margin:0; color:#166534;"><strong>UPI ID</strong></p></div>', unsafe_allow_html=True)
         st.code("writernical@sbi", language=None)
         
         wa_msg = "Hi, I paid ₹15 for UPSC Predictor. Sending screenshot."
         st.link_button(
-            "💬 Step 2: Send Screenshot on WhatsApp",
+            "💬 Send Screenshot on WhatsApp",
             f"https://wa.me/919150801098?text={wa_msg.replace(' ', '%20')}",
             use_container_width=True
         )
-        st.caption("You'll receive an access code within 15 minutes.")
+        st.caption("Manual verification within 15 minutes.")
 
 
 def show_code_entry():
@@ -280,10 +435,13 @@ def show_code_entry():
             if code_input:
                 valid, msg = validate_access_code(code_input)
                 if valid:
-                    st.session_state.credits += 1
-                    st.session_state.used_codes.add(code_input.strip().upper())
-                    st.session_state.just_paid = True
-                    st.rerun()
+                    code_upper = code_input.strip().upper()
+                    if mark_code_used(code_upper):
+                        st.session_state.credits = st.session_state.get('credits', 0) + 1
+                        st.session_state.just_paid = True
+                        st.rerun()
+                    else:
+                        st.error("❌ Could not redeem code. Try again or contact support.")
                 else:
                     st.error(msg)
             else:
@@ -295,7 +453,7 @@ def show_code_entry():
 # =============================================================================
 
 if 'credits' not in st.session_state:
-    st.session_state.credits = 0  # No free credit on load
+    st.session_state.credits = 0
 
 if 'total_queries' not in st.session_state:
     st.session_state.total_queries = 0
@@ -303,8 +461,12 @@ if 'total_queries' not in st.session_state:
 if 'just_paid' not in st.session_state:
     st.session_state.just_paid = False
 
-if 'used_codes' not in st.session_state:
-    st.session_state.used_codes = set()
+
+# =============================================================================
+# PROCESS RAZORPAY RETURN (before rendering UI)
+# =============================================================================
+
+process_razorpay_return()
 
 
 # =============================================================================
@@ -339,14 +501,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# Status banner
 if st.session_state.just_paid:
-    st.markdown('<div class="paid-banner"><h3>✅ Code redeemed! Enter your topic below.</h3></div>', unsafe_allow_html=True)
+    st.markdown('<div class="paid-banner"><h3>✅ Payment successful! Enter your topic below.</h3></div>', unsafe_allow_html=True)
     st.session_state.just_paid = False
 
 
 # =============================================================================
-# PROBLEM + FEATURES (show when no queries done yet)
+# PROBLEM + FEATURES
 # =============================================================================
 
 if st.session_state.total_queries == 0:
@@ -374,7 +535,6 @@ if st.session_state.total_queries == 0:
     with c3:
         st.markdown('<div class="feature-card"><h4>📋 Answer Frameworks</h4><p>Word allocation, must-include cases, committees, articles — and balanced conclusions that examiners want to see.</p></div>', unsafe_allow_html=True)
     
-    # Free trial codes
     st.markdown("""
     <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 1.2rem; border-radius: 10px; text-align: center; margin: 1.5rem 0;">
         <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem;">🎁 Try it FREE — use one of these codes below</h3>
@@ -385,16 +545,14 @@ if st.session_state.total_queries == 0:
 
 
 # =============================================================================
-# MAIN: CODE ENTRY → INPUT → GENERATE  or  PAYMENT
+# MAIN
 # =============================================================================
 
 st.markdown("---")
 
-# Always show the code entry box at top
 show_code_entry()
 
 if st.session_state.credits > 0:
-    # ── HAS CREDITS: SHOW INPUT ──
     st.markdown("---")
     st.markdown("### Enter Any Current Affairs Topic")
     
@@ -435,7 +593,6 @@ if st.session_state.credits > 0:
                 
                 st.balloons()
 else:
-    # ── NO CREDITS: SHOW PAYMENT ──
     st.markdown("---")
     show_payment_section()
 
