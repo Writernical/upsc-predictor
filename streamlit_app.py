@@ -187,8 +187,10 @@ def get_user_by_email(email: str):
     try:
         email = email.lower().strip()
         result = supabase.table('users').select('*').eq('email', email).execute()
-        return result.data[0] if result.data else None
-    except Exception:
+        user = result.data[0] if result.data else None
+        return user
+    except Exception as e:
+        st.error(f"Debug get_user error: {str(e)}")
         return None
 
 
@@ -220,9 +222,11 @@ def update_user_credits(email: str, free_credits: int, paid_credits: int, total_
         if total_queries is not None:
             update_data['total_queries'] = total_queries
             update_data['last_query_at'] = datetime.utcnow().isoformat()
-        supabase.table('users').update(update_data).eq('email', email).execute()
+        result = supabase.table('users').update(update_data).eq('email', email).execute()
+        st.info(f"Debug update: email={email}, data={update_data}, result={result.data}")
         return True
-    except Exception:
+    except Exception as e:
+        st.error(f"Debug update error: {str(e)}")
         return False
 
 
@@ -231,24 +235,32 @@ def add_paid_credits(email: str, credits_to_add: int = 1):
     email = email.lower().strip()
     user = get_user_by_email(email)
     
+    st.info(f"Debug add_paid: email={email}, existing user={user}")
+    
     if user:
         new_paid = user.get('paid_credits', 0) + credits_to_add
-        update_user_credits(email, user.get('free_credits', 0), new_paid)
+        new_free = user.get('free_credits', 0)
+        st.info(f"Debug add_paid: Updating to free={new_free}, paid={new_paid}")
+        success = update_user_credits(email, new_free, new_paid)
+        st.info(f"Debug add_paid: Update success={success}")
         return new_paid
     else:
         # Create user with paid credit (no free credit since they paid first)
+        st.info(f"Debug add_paid: Creating new user with email {email}")
         if not supabase:
             return 0
         try:
-            supabase.table('users').insert({
+            result = supabase.table('users').insert({
                 'email': email,
                 'free_credits': 0,
                 'paid_credits': credits_to_add,
                 'total_queries': 0,
                 'email_verified': True
             }).execute()
+            st.info(f"Debug add_paid: Insert result={result.data}")
             return credits_to_add
-        except Exception:
+        except Exception as e:
+            st.error(f"Debug add_paid: Insert error={str(e)}")
             return 0
 
 
@@ -297,9 +309,14 @@ def fetch_email_from_payment(payment_id: str) -> str:
         
         if response.status_code == 200:
             payment = response.json()
-            return payment.get('email', '').lower().strip()
+            email = payment.get('email', '')
+            st.info(f"Debug: Razorpay returned email = {email}")
+            return email.lower().strip() if email else None
+        else:
+            st.error(f"Razorpay API error: {response.status_code} - {response.text}")
         return None
-    except Exception:
+    except Exception as e:
+        st.error(f"Fetch email error: {str(e)}")
         return None
 
 
@@ -311,20 +328,29 @@ def process_razorpay_return():
         return False
     
     payment_id = params.get('razorpay_payment_id', '')
+    st.info(f"Debug: Processing payment {payment_id}")
     
     if is_payment_processed(payment_id):
+        st.info("Debug: Payment already processed")
         st.query_params.clear()
         return False
     
+    # Fetch email from Razorpay
     email = fetch_email_from_payment(payment_id)
+    
     if not email:
         st.error("Could not fetch payment details. Contact support.")
         st.query_params.clear()
         return False
     
+    st.info(f"Debug: Adding credit to {email}")
+    
     if record_payment(payment_id, email):
-        add_paid_credits(email, 1)
+        new_paid = add_paid_credits(email, 1)
+        st.info(f"Debug: New paid credits = {new_paid}")
+        
         user = get_user_by_email(email)
+        st.info(f"Debug: User from DB = {user}")
         
         if user:
             st.session_state.email = email
