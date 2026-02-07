@@ -16,7 +16,6 @@ STREAMLIT SECRETS:
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
 import anthropic
 import requests
 import random
@@ -673,7 +672,7 @@ def show_email_entry():
 
 
 def show_payment_section():
-    """Display Razorpay embedded checkout."""
+    """Display Razorpay payment button."""
     st.markdown("""
     <div class="pay-box">
         <h3>☕ ₹12 — Less than your chai</h3>
@@ -682,67 +681,41 @@ def show_payment_section():
     </div>
     """, unsafe_allow_html=True)
     
-    # If user is logged in, show embedded checkout
-    if st.session_state.logged_in:
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
         try:
-            key_id = st.secrets["RAZORPAY_KEY_ID"]
-            user_email = st.session_state.email
+            razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
             
-            # Razorpay checkout HTML/JS
-            checkout_html = f"""
-            <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-            <div style="display: flex; flex-direction: column; align-items: center; padding: 20px;">
-                <button id="rzp-button" style="
-                    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-                    color: white;
-                    border: none;
-                    padding: 16px 32px;
-                    font-size: 18px;
-                    font-weight: 600;
-                    border-radius: 10px;
-                    cursor: pointer;
-                    width: 100%;
-                    max-width: 300px;
-                    margin: 10px 0;
-                    box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
-                ">💳 Pay ₹12 — Get 1 Query</button>
-                <p style="text-align: center; color: #64748b; font-size: 13px; margin-top: 12px;">
-                    Secure payment via Razorpay • UPI, Cards, Net Banking
-                </p>
-            </div>
-            <script>
-            var options = {{
-                "key": "{key_id}",
-                "amount": "1200",
-                "currency": "INR",
-                "name": "UPSC Predictor",
-                "description": "1 Query Credit",
-                "prefill": {{
-                    "email": "{user_email}"
-                }},
-                "theme": {{
-                    "color": "#3b82f6"
-                }},
-                "handler": function (response) {{
-                    window.location.href = window.location.origin + window.location.pathname + 
-                        "?razorpay_payment_id=" + response.razorpay_payment_id;
-                }}
-            }};
-            var rzp = new Razorpay(options);
-            document.getElementById('rzp-button').onclick = function(e) {{
-                rzp.open();
-                e.preventDefault();
-            }};
-            </script>
-            """
+            # Show user's email if logged in
+            if st.session_state.logged_in:
+                st.info(f"💡 **Use this email in Razorpay:** {st.session_state.email}")
             
-            components.html(checkout_html, height=150)
+            st.link_button("💳 Pay ₹12 — Get 1 Query", razorpay_url, use_container_width=True, type="primary")
+            st.caption("Secure payment via Razorpay • UPI, Cards, Net Banking")
             
-        except Exception as e:
-            st.error(f"Payment error: {str(e)}")
-    else:
-        # Not logged in - show message
-        st.info("Please login first to buy credits.")
+            st.markdown("---")
+            st.markdown("**After payment:**")
+            st.markdown("1. Complete payment using the same email")
+            st.markdown("2. Come back here and click **Refresh Credits** below")
+            
+            # Refresh credits button
+            if st.session_state.logged_in:
+                if st.button("🔄 Refresh Credits", use_container_width=True):
+                    with st.spinner("Checking for payments..."):
+                        pending = check_and_credit_pending_payments(st.session_state.email)
+                    if pending > 0:
+                        user = get_user_by_email(st.session_state.email)
+                        if user:
+                            st.session_state.free_credits = user.get('free_credits', 0)
+                            st.session_state.paid_credits = user.get('paid_credits', 0)
+                        st.success(f"✅ Added {pending} credit(s)!")
+                        st.session_state.show_payment = False
+                        st.rerun()
+                    else:
+                        st.warning("No new payments found. Make sure you used the same email.")
+            
+        except (KeyError, FileNotFoundError):
+            st.error("Payment not configured. Contact support.")
 
 
 # =============================================================================
