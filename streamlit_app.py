@@ -505,38 +505,40 @@ process_razorpay_return()
 # =============================================================================
 
 with st.sidebar:
-    st.markdown("### Your Account")
+    st.markdown("### Your Session")
     
     if st.session_state.logged_in:
-        st.markdown(f"📱 **{st.session_state.phone}**")
+        st.markdown(f"📱 {st.session_state.phone}")
         if st.session_state.credits > 0:
             st.success(f"✅ **{st.session_state.credits}** query ready")
         else:
             st.warning("⚡ No queries left")
-        st.markdown(f"Total queries used: **{st.session_state.total_queries}**")
-        
-        st.markdown("---")
-        
-        # Buy Credits button
-        try:
-            razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
-            st.link_button("💳 Buy Credits (₹12)", razorpay_url, use_container_width=True)
-        except:
-            pass
-        
-        st.markdown("---")
-        
+        st.markdown(f"Queries used: **{st.session_state.total_queries}**")
+    else:
+        st.info("Enter phone to start")
+    
+    st.markdown("---")
+    st.markdown("**₹12 per query**")
+    
+    st.markdown("---")
+    
+    # Buy Credits button
+    try:
+        razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
+        st.link_button("💳 Buy Credits", razorpay_url, use_container_width=True)
+    except:
+        pass
+    
+    if st.session_state.logged_in:
         if st.button("Logout", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.phone = None
             st.session_state.credits = 0
             st.rerun()
-    else:
-        st.info("Enter phone number to start")
     
     st.markdown("---")
     st.markdown("**Follow Us**")
-    st.markdown("[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white)](https://www.youtube.com/channel/UCMVxFvBmNwIdLFdq65yqTFg) [![Instagram](https://img.shields.io/badge/Instagram-E4405F?style=flat&logo=instagram&logoColor=white)](https://www.instagram.com/upscpredictor.in)")
+    st.markdown("[📺 YouTube](https://www.youtube.com/channel/UCMVxFvBmNwIdLFdq65yqTFg) • [📸 Instagram](https://www.instagram.com/upscpredictor.in)")
 
 
 # =============================================================================
