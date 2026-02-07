@@ -48,10 +48,6 @@ def get_supabase_client():
 
 supabase = get_supabase_client()
 
-# Debug: Check if supabase is connected
-if not supabase:
-    st.sidebar.error("⚠️ DB not connected")
-
 # =============================================================================
 # CSS
 # =============================================================================
@@ -94,6 +90,9 @@ st.markdown("""
 
 def get_user_by_phone(phone: str):
     """Get user record by phone number."""
+    phone = normalize_phone(phone)
+    if not phone:
+        return None
     if not supabase:
         return None
     try:
@@ -105,6 +104,9 @@ def get_user_by_phone(phone: str):
 
 def create_user(phone: str):
     """Create new user with 1 free credit."""
+    phone = normalize_phone(phone)
+    if not phone:
+        return None
     if not supabase:
         st.error("Database not connected")
         return None
@@ -123,6 +125,9 @@ def create_user(phone: str):
 
 def update_user_credits(phone: str, free_credits: int, paid_credits: int, total_queries: int = None):
     """Update user credits."""
+    phone = normalize_phone(phone)
+    if not phone:
+        return False
     if not supabase:
         return False
     try:
@@ -138,20 +143,31 @@ def update_user_credits(phone: str, free_credits: int, paid_credits: int, total_
 
 def add_paid_credits(phone: str, credits_to_add: int = 1):
     """Add paid credits to user."""
+    phone = normalize_phone(phone)
+    if not phone:
+        st.error("Invalid phone from payment")
+        return 0
+    
     user = get_user_by_phone(phone)
     if user:
         new_paid = user.get('paid_credits', 0) + credits_to_add
         update_user_credits(phone, user.get('free_credits', 0), new_paid)
         return new_paid
     else:
-        # Create user with no free credit (they paid first somehow)
-        create_user(phone)
-        user = get_user_by_phone(phone)
-        if user:
-            new_paid = credits_to_add
-            update_user_credits(phone, user.get('free_credits', 1), new_paid)
-            return new_paid
-    return 0
+        # User doesn't exist yet - create with paid credit
+        if not supabase:
+            return 0
+        try:
+            supabase.table('users').insert({
+                'phone': phone,
+                'free_credits': 1,
+                'paid_credits': credits_to_add,
+                'total_queries': 0
+            }).execute()
+            return credits_to_add
+        except Exception as e:
+            st.error(f"Could not add credits: {str(e)}")
+            return 0
 
 
 def is_payment_processed(payment_id: str) -> bool:
@@ -167,6 +183,7 @@ def is_payment_processed(payment_id: str) -> bool:
 
 def record_payment(payment_id: str, phone: str, amount: int = 12):
     """Record payment in database."""
+    phone = normalize_phone(phone)
     if not supabase:
         st.session_state.setdefault('processed_payments', set()).add(payment_id)
         return True
@@ -186,6 +203,23 @@ def record_payment(payment_id: str, phone: str, amount: int = 12):
 # RAZORPAY FUNCTIONS
 # =============================================================================
 
+def normalize_phone(phone: str) -> str:
+    """Normalize phone to 10 digits only."""
+    if not phone:
+        return None
+    # Remove all non-digits
+    phone = ''.join(filter(str.isdigit, phone))
+    # Remove country code if present
+    if phone.startswith('91') and len(phone) == 12:
+        phone = phone[2:]
+    if phone.startswith('0') and len(phone) == 11:
+        phone = phone[1:]
+    # Validate 10 digits
+    if len(phone) == 10:
+        return phone
+    return None
+
+
 def fetch_phone_from_payment(payment_id: str) -> str:
     """Fetch phone number from Razorpay payment using API."""
     try:
@@ -200,12 +234,7 @@ def fetch_phone_from_payment(payment_id: str) -> str:
         if response.status_code == 200:
             payment = response.json()
             contact = payment.get('contact', '')
-            # Razorpay returns phone with +91, normalize it
-            if contact.startswith('+91'):
-                contact = contact[3:]
-            elif contact.startswith('91') and len(contact) == 12:
-                contact = contact[2:]
-            return contact
+            return normalize_phone(contact)
         return None
     except Exception:
         return None
@@ -446,41 +475,46 @@ def show_phone_entry():
             elif not phone_input or len(phone_input) != 10 or not phone_input.isdigit():
                 st.error("Please enter a valid 10-digit phone number.")
             else:
-                # Check if user exists
-                user = get_user_by_phone(phone_input)
-                if user:
-                    # Returning user - load credits from DB only
-                    st.session_state.phone = phone_input
-                    st.session_state.free_credits = user.get('free_credits', 0)
-                    st.session_state.paid_credits = user.get('paid_credits', 0)
-                    st.session_state.total_queries = user.get('total_queries', 0)
-                    st.session_state.logged_in = True
-                    st.rerun()
+                # Normalize phone
+                phone = normalize_phone(phone_input)
+                if not phone:
+                    st.error("Invalid phone number format.")
                 else:
-                    # New user - try to create with 1 free credit
-                    new_user = create_user(phone_input)
-                    if new_user:
-                        # Successfully created - give free credit
-                        st.session_state.phone = phone_input
-                        st.session_state.free_credits = 1
-                        st.session_state.paid_credits = 0
-                        st.session_state.total_queries = 0
+                    # Check if user exists
+                    user = get_user_by_phone(phone)
+                    if user:
+                        # Returning user - load credits from DB only
+                        st.session_state.phone = phone
+                        st.session_state.free_credits = user.get('free_credits', 0)
+                        st.session_state.paid_credits = user.get('paid_credits', 0)
+                        st.session_state.total_queries = user.get('total_queries', 0)
                         st.session_state.logged_in = True
-                        st.session_state.is_new_user = True
                         st.rerun()
                     else:
-                        # Creation failed - maybe race condition, check again
-                        user = get_user_by_phone(phone_input)
-                        if user:
-                            # User was created in parallel, load their data
-                            st.session_state.phone = phone_input
-                            st.session_state.free_credits = user.get('free_credits', 0)
-                            st.session_state.paid_credits = user.get('paid_credits', 0)
-                            st.session_state.total_queries = user.get('total_queries', 0)
+                        # New user - try to create with 1 free credit
+                        new_user = create_user(phone)
+                        if new_user:
+                            # Successfully created - give free credit
+                            st.session_state.phone = phone
+                            st.session_state.free_credits = 1
+                            st.session_state.paid_credits = 0
+                            st.session_state.total_queries = 0
                             st.session_state.logged_in = True
+                            st.session_state.is_new_user = True
                             st.rerun()
                         else:
-                            st.error("Could not create account. Please try again.")
+                            # Creation failed - maybe race condition, check again
+                            user = get_user_by_phone(phone)
+                            if user:
+                                # User was created in parallel, load their data
+                                st.session_state.phone = phone
+                                st.session_state.free_credits = user.get('free_credits', 0)
+                                st.session_state.paid_credits = user.get('paid_credits', 0)
+                                st.session_state.total_queries = user.get('total_queries', 0)
+                                st.session_state.logged_in = True
+                                st.rerun()
+                            else:
+                                st.error("Could not create account. Please try again.")
 
 
 def show_payment_section():
