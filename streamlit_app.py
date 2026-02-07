@@ -98,14 +98,15 @@ def get_user_by_phone(phone: str):
         return None
 
 
-def create_user(phone: str, credits: int = 1):
-    """Create new user with initial credits."""
+def create_user(phone: str):
+    """Create new user with 1 free credit."""
     if not supabase:
         return None
     try:
         result = supabase.table('users').insert({
             'phone': phone,
-            'credits': credits,
+            'free_credits': 1,
+            'paid_credits': 0,
             'total_queries': 0
         }).execute()
         return result.data[0] if result.data else None
@@ -113,12 +114,12 @@ def create_user(phone: str, credits: int = 1):
         return None
 
 
-def update_user_credits(phone: str, credits: int, total_queries: int = None):
-    """Update user credits (and optionally total_queries)."""
+def update_user_credits(phone: str, free_credits: int, paid_credits: int, total_queries: int = None):
+    """Update user credits."""
     if not supabase:
         return False
     try:
-        update_data = {'credits': credits}
+        update_data = {'free_credits': free_credits, 'paid_credits': paid_credits}
         if total_queries is not None:
             update_data['total_queries'] = total_queries
             update_data['last_query_at'] = datetime.utcnow().isoformat()
@@ -128,16 +129,22 @@ def update_user_credits(phone: str, credits: int, total_queries: int = None):
         return False
 
 
-def add_credits_to_user(phone: str, credits_to_add: int = 1):
-    """Add credits to existing user or create new user."""
+def add_paid_credits(phone: str, credits_to_add: int = 1):
+    """Add paid credits to user."""
     user = get_user_by_phone(phone)
     if user:
-        new_credits = user['credits'] + credits_to_add
-        update_user_credits(phone, new_credits)
-        return new_credits
+        new_paid = user.get('paid_credits', 0) + credits_to_add
+        update_user_credits(phone, user.get('free_credits', 0), new_paid)
+        return new_paid
     else:
-        create_user(phone, credits_to_add)
-        return credits_to_add
+        # Create user with no free credit (they paid first somehow)
+        create_user(phone)
+        user = get_user_by_phone(phone)
+        if user:
+            new_paid = credits_to_add
+            update_user_credits(phone, user.get('free_credits', 1), new_paid)
+            return new_paid
+    return 0
 
 
 def is_payment_processed(payment_id: str) -> bool:
@@ -218,13 +225,17 @@ def process_razorpay_return():
         st.query_params.clear()
         return False
     
-    # Record payment and add credit
+    # Record payment and add paid credit
     if record_payment(payment_id, phone):
-        new_credits = add_credits_to_user(phone, 1)
-        st.session_state.phone = phone
-        st.session_state.credits = new_credits
-        st.session_state.logged_in = True
-        st.session_state.just_paid = True
+        add_paid_credits(phone, 1)
+        user = get_user_by_phone(phone)
+        if user:
+            st.session_state.phone = phone
+            st.session_state.free_credits = user.get('free_credits', 0)
+            st.session_state.paid_credits = user.get('paid_credits', 0)
+            st.session_state.total_queries = user.get('total_queries', 0)
+            st.session_state.logged_in = True
+            st.session_state.just_paid = True
         st.query_params.clear()
         return True
     
@@ -431,21 +442,38 @@ def show_phone_entry():
                 # Check if user exists
                 user = get_user_by_phone(phone_input)
                 if user:
-                    # Returning user
+                    # Returning user - load credits from DB only
                     st.session_state.phone = phone_input
-                    st.session_state.credits = user['credits']
-                    st.session_state.total_queries = user['total_queries']
+                    st.session_state.free_credits = user.get('free_credits', 0)
+                    st.session_state.paid_credits = user.get('paid_credits', 0)
+                    st.session_state.total_queries = user.get('total_queries', 0)
                     st.session_state.logged_in = True
                     st.rerun()
                 else:
-                    # New user - give 1 free credit
-                    create_user(phone_input, credits=1)
-                    st.session_state.phone = phone_input
-                    st.session_state.credits = 1
-                    st.session_state.total_queries = 0
-                    st.session_state.logged_in = True
-                    st.session_state.is_new_user = True
-                    st.rerun()
+                    # New user - try to create with 1 free credit
+                    new_user = create_user(phone_input)
+                    if new_user:
+                        # Successfully created - give free credit
+                        st.session_state.phone = phone_input
+                        st.session_state.free_credits = 1
+                        st.session_state.paid_credits = 0
+                        st.session_state.total_queries = 0
+                        st.session_state.logged_in = True
+                        st.session_state.is_new_user = True
+                        st.rerun()
+                    else:
+                        # Creation failed - maybe race condition, check again
+                        user = get_user_by_phone(phone_input)
+                        if user:
+                            # User was created in parallel, load their data
+                            st.session_state.phone = phone_input
+                            st.session_state.free_credits = user.get('free_credits', 0)
+                            st.session_state.paid_credits = user.get('paid_credits', 0)
+                            st.session_state.total_queries = user.get('total_queries', 0)
+                            st.session_state.logged_in = True
+                            st.rerun()
+                        else:
+                            st.error("Could not create account. Please try again.")
 
 
 def show_payment_section():
@@ -478,8 +506,11 @@ if 'logged_in' not in st.session_state:
 if 'phone' not in st.session_state:
     st.session_state.phone = None
 
-if 'credits' not in st.session_state:
-    st.session_state.credits = 0
+if 'free_credits' not in st.session_state:
+    st.session_state.free_credits = 0
+
+if 'paid_credits' not in st.session_state:
+    st.session_state.paid_credits = 0
 
 if 'total_queries' not in st.session_state:
     st.session_state.total_queries = 0
@@ -507,32 +538,41 @@ with st.sidebar:
     
     if st.session_state.logged_in:
         st.markdown(f"📱 {st.session_state.phone}")
-        if st.session_state.credits > 0:
-            st.success(f"✅ **{st.session_state.credits}** query ready")
+        
+        # Show credits separately
+        total_credits = st.session_state.free_credits + st.session_state.paid_credits
+        if total_credits > 0:
+            st.success(f"✅ **{total_credits}** query ready")
         else:
             st.warning("⚡ No queries left")
-        st.markdown(f"Queries used: **{st.session_state.total_queries}**")
-    else:
-        st.info("Enter phone to start")
-    
-    st.markdown("---")
-    st.markdown("**₹12 per query**")
-    
-    st.markdown("---")
-    
-    # Buy Credits button
-    try:
-        razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
-        st.link_button("💳 Buy Credits", razorpay_url, use_container_width=True)
-    except:
-        pass
-    
-    if st.session_state.logged_in:
+        
+        st.markdown(f"🎁 Free: **{st.session_state.free_credits}**")
+        st.markdown(f"💳 Paid: **{st.session_state.paid_credits}**")
+        st.markdown(f"📊 Used: **{st.session_state.total_queries}**")
+        
+        st.markdown("---")
+        st.markdown("**₹12 per query**")
+        
+        st.markdown("---")
+        
+        # Buy Credits button
+        try:
+            razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
+            st.link_button("💳 Buy Credits", razorpay_url, use_container_width=True)
+        except:
+            pass
+        
         if st.button("Logout", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.phone = None
-            st.session_state.credits = 0
+            st.session_state.free_credits = 0
+            st.session_state.paid_credits = 0
             st.rerun()
+    else:
+        st.markdown("👇 **Enter phone below to start**")
+        st.markdown("---")
+        st.markdown("**₹12 per query**")
+        st.markdown("*1 FREE query for new users*")
     
     st.markdown("---")
     st.markdown("**Follow Us**")
@@ -601,7 +641,9 @@ if not st.session_state.logged_in:
 else:
     # ── LOGGED IN ──
     
-    if st.session_state.credits > 0:
+    total_credits = st.session_state.free_credits + st.session_state.paid_credits
+    
+    if total_credits > 0:
         # ── HAS CREDITS: SHOW INPUT ──
         st.markdown("### Enter Any Current Affairs Topic")
         
@@ -622,14 +664,19 @@ else:
             else:
                 output = generate_questions(topic_text)
                 if output:
-                    # Update session
-                    st.session_state.credits -= 1
+                    # Deduct credit - free first, then paid
+                    if st.session_state.free_credits > 0:
+                        st.session_state.free_credits -= 1
+                    else:
+                        st.session_state.paid_credits -= 1
+                    
                     st.session_state.total_queries += 1
                     
                     # Update database
                     update_user_credits(
                         st.session_state.phone,
-                        st.session_state.credits,
+                        st.session_state.free_credits,
+                        st.session_state.paid_credits,
                         st.session_state.total_queries
                     )
                     
@@ -643,7 +690,8 @@ else:
                         mime="text/plain"
                     )
                     
-                    if st.session_state.credits == 0:
+                    new_total = st.session_state.free_credits + st.session_state.paid_credits
+                    if new_total == 0:
                         st.markdown("---")
                         st.info("🎯 **Liked it?** Get more queries for ₹12 each.")
                         show_payment_section()
@@ -668,7 +716,8 @@ with st.expander("📄 See a sample output — what you get"):
 
 **📌 TOPIC ANALYSIS**
 
-**Primary Subject:** GS-II (Polity & Governance)
+**Topic:** Governor returns NEET bill in Tamil Nadu  
+**Primary Subject:** GS-II — Polity & Governance
 
 **Cross-Subject Angles:**
 • **History (GS-I)** — Evolution of Governor's office from British era
@@ -687,36 +736,68 @@ with st.expander("📄 See a sample output — what you get"):
 2. Governor can return a Bill only once
 3. No time limit for Governor to act on Bills
 
-Which is correct?
+Which is correct?  
 (a) 1 and 2 &nbsp; (b) 2 and 3 &nbsp; (c) 1 and 3 &nbsp; (d) All
 
-✓ **Answer: (b)**
-⚠️ **Trap:** "must" in Statement 1 — Governor CAN reserve Money Bills for President
+✓ **Answer: (b)**  
+⚠️ **Trap:** "must" in Statement 1 — Governor CAN reserve Money Bills for President  
+💡 **Key Point:** Article 200 gives Governor 4 options but no time limit specified
 
 ---
 
-**📝 SECTION B: CROSS-SUBJECT MCQs 🔀**
+**📝 SECTION B: CROSS-SUBJECT MCQs (Q4-Q5) 🔀**
 
 **Q4 | History | CROSS-ANGLE 🔀**
 
-*The office of Governor in British India was established under:*
-(a) Regulating Act, 1773
-(b) Charter Act, 1833
-(c) Government of India Act, 1858
+*The office of Governor in British India was established under:*  
+(a) Regulating Act, 1773  
+(b) Charter Act, 1833  
+(c) Government of India Act, 1858  
 (d) Indian Councils Act, 1909
 
-✓ **Answer: (a)**
+✓ **Answer: (a)**  
 💡 **Cross-Link:** Current debates trace back to colonial design of the office
 
 ---
 
-**📝 SECTION D: CROSS-SUBJECT MAINS 🔀**
+**📝 SECTION C: PRIMARY MAINS (M1-M2)**
 
-**M5 | GS-IV | Ethics | Case Study**
+**M1 | GS-II | Polity | PRIMARY | 15 marks**
 
-*You are a newly appointed Governor. The ruling party at Centre asks you to delay a state bill that could embarrass them politically. The bill has popular support. What would you do?*
+*"The office of Governor has become a tool for Centre-State confrontation rather than cooperation." Critically examine with recent examples.*
 
-**Ethical Dimensions:** Constitutional duty vs political pressure, Integrity vs loyalty
+**Answer Framework (250 words):**
+
+• **Intro (30 words):** Define Governor's constitutional role under Article 153-162. Acknowledge recent controversies have reignited debate on gubernatorial discretion.
+
+• **Body (180 words):**
+  - Constitutional position: Agent of Centre, not elected, serves at pleasure
+  - Areas of friction: Bill assent delays, dissolution advice, President's rule
+  - Recent examples: Tamil Nadu NEET bill, Kerala ordinance row, Punjab budget session
+  - Sarkaria Commission view: Should be detached figure, not political agent
+  - Punchhi Commission: Fixed 6-month timeline for bill action recommended
+
+• **Conclusion (40 words):** Balanced view — Governor's discretion needed for constitutional safeguards, but must not become instrument of partisan politics. Codification of timelines could resolve ambiguity.
+
+**Must Include:** Nabam Rebia case, Sarkaria Commission, Article 200  
+**Avoid:** One-sided criticism of either Centre or States
+
+---
+
+**📝 SECTION D: CROSS-SUBJECT MAINS (M3-M5) 🔀**
+
+**M5 | GS-IV | Ethics | CROSS-ANGLE 🔀 | Case Study**
+
+*You are a newly appointed Governor. The ruling party at Centre asks you to delay a state bill that could embarrass them politically. The bill has popular mandate and passed with 2/3rd majority. What would you do?*
+
+**Ethical Dimensions:** Constitutional duty vs political loyalty, Integrity vs career preservation
+
+**Framework:**
+• Identify stakeholders: Centre, State govt, citizens, Constitution
+• Values at stake: Constitutional morality, integrity, impartiality
+• Options: Comply with Centre, follow Constitution, seek legal opinion
+• Decision: Act per Article 200 — assent, return once, or reserve for President with reasons
+• Justify: Oath of office binds to Constitution, not political masters
 """)
 
 
