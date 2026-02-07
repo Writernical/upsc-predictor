@@ -690,17 +690,32 @@ def show_payment_section():
             if st.session_state.logged_in:
                 st.info(f"💡 **Use this email in Razorpay:** {st.session_state.email}")
             
-            st.link_button("💳 Pay ₹12 — Get 1 Query", razorpay_url, use_container_width=True, type="primary")
-            st.caption("Secure payment via Razorpay • UPI, Cards, Net Banking")
+            # Open in new tab using HTML button
+            st.markdown(f"""
+            <a href="{razorpay_url}" target="_blank" style="
+                display: inline-block;
+                width: 100%;
+                text-align: center;
+                background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+                color: white;
+                padding: 12px 24px;
+                font-size: 16px;
+                font-weight: 600;
+                border-radius: 8px;
+                text-decoration: none;
+                box-shadow: 0 4px 14px rgba(59, 130, 246, 0.3);
+            ">💳 Pay ₹12 — Get 1 Query</a>
+            <p style="text-align: center; color: #64748b; font-size: 12px; margin-top: 8px;">
+                Opens in new tab • Secure payment via Razorpay
+            </p>
+            """, unsafe_allow_html=True)
             
             st.markdown("---")
-            st.markdown("**After payment:**")
-            st.markdown("1. Complete payment using the same email")
-            st.markdown("2. Come back here and click **Refresh Credits** below")
+            st.markdown("**After payment, come back here and click:**")
             
             # Refresh credits button
             if st.session_state.logged_in:
-                if st.button("🔄 Refresh Credits", use_container_width=True):
+                if st.button("🔄 Refresh Credits", use_container_width=True, type="primary"):
                     with st.spinner("Checking for payments..."):
                         pending = check_and_credit_pending_payments(st.session_state.email)
                     if pending > 0:
