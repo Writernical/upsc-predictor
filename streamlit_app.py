@@ -1,25 +1,23 @@
 """
-UPSC MULTI-ANGLE PREDICTOR v6.0
+UPSC MULTI-ANGLE PREDICTOR v7.0
 ================================
-Supabase database + Razorpay payments
-- Used codes tracked in database (no refresh exploit)
-- Razorpay auto-payment with instant credit
+- Phone-first: 1 free query per phone (no loophole)
+- Razorpay: Auto-fetch phone from payment, save credit to DB
+- ₹12 per query
+- T&C before first use
 
-STREAMLIT SECRETS NEEDED:
+STREAMLIT SECRETS:
     ANTHROPIC_API_KEY = "sk-ant-..."
-    CREDIT_CODES = "UPSC-79CV,UPSC-ID5E,..."
-    FREE_CODES = "FREE-7ZAV,FREE-3945,..."
     SUPABASE_URL = "https://xxxxx.supabase.co"
     SUPABASE_KEY = "eyJhbG..."
-    RAZORPAY_KEY_ID = "rzp_test_xxxxx"
+    RAZORPAY_KEY_ID = "rzp_live_xxxxx"
     RAZORPAY_KEY_SECRET = "xxxxxxxxxxxxx"
     RAZORPAY_PAYMENT_URL = "https://rzp.io/rzp/xxxxx"
 """
 
 import streamlit as st
 import anthropic
-import hmac
-import hashlib
+import razorpay
 import os
 from datetime import datetime
 from supabase import create_client
@@ -35,12 +33,11 @@ st.set_page_config(
 )
 
 # =============================================================================
-# SUPABASE CLIENT
+# CLIENTS
 # =============================================================================
 
 @st.cache_resource
 def get_supabase_client():
-    """Initialize Supabase client (cached)."""
     try:
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
@@ -48,7 +45,17 @@ def get_supabase_client():
     except Exception:
         return None
 
+@st.cache_resource
+def get_razorpay_client():
+    try:
+        key_id = st.secrets["RAZORPAY_KEY_ID"]
+        key_secret = st.secrets["RAZORPAY_KEY_SECRET"]
+        return razorpay.Client(auth=(key_id, key_secret))
+    except Exception:
+        return None
+
 supabase = get_supabase_client()
+razorpay_client = get_razorpay_client()
 
 # =============================================================================
 # CSS
@@ -73,9 +80,13 @@ st.markdown("""
     .feature-card h4 { margin: 0 0 0.5rem 0; color: #334155; font-size: 0.95rem; }
     .feature-card p { margin: 0; color: #64748b; font-size: 0.85rem; line-height: 1.5; }
     .output-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.5rem; margin: 1rem 0; }
-    .upi-box { background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 1rem; margin-top: 1rem; text-align: center; }
-    .code-box { background: #f0f9ff; border: 2px solid #38bdf8; border-radius: 12px; padding: 1.5rem; text-align: center; margin: 1.5rem 0; }
+    .phone-box { background: #f0fdf4; border: 2px solid #22c55e; border-radius: 12px; padding: 1.5rem; text-align: center; margin: 1.5rem 0; }
     .footer { text-align: center; padding: 2rem 1rem; color: #94a3b8; font-size: 0.85rem; border-top: 1px solid #e2e8f0; margin-top: 2rem; }
+    .social-links { margin-top: 1rem; }
+    .social-links a { margin: 0 10px; text-decoration: none; font-size: 1.5rem; }
+    .tc-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; margin: 1rem 0; font-size: 0.85rem; }
+    .tc-box ol { margin: 0.5rem 0; padding-left: 1.2rem; }
+    .tc-box li { margin: 0.4rem 0; color: #475569; }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
 </style>
@@ -86,53 +97,79 @@ st.markdown("""
 # DATABASE FUNCTIONS
 # =============================================================================
 
-def is_code_used(code: str) -> bool:
-    """Check if a code has been used (in database)."""
+def get_user_by_phone(phone: str):
+    """Get user record by phone number."""
     if not supabase:
-        return code in st.session_state.get('used_codes', set())
-    
+        return None
     try:
-        result = supabase.table('used_codes').select('code').eq('code', code).execute()
-        return len(result.data) > 0
+        result = supabase.table('users').select('*').eq('phone', phone).execute()
+        return result.data[0] if result.data else None
     except Exception:
-        return code in st.session_state.get('used_codes', set())
+        return None
 
 
-def mark_code_used(code: str) -> bool:
-    """Mark a code as used in database."""
+def create_user(phone: str, credits: int = 1):
+    """Create new user with initial credits."""
     if not supabase:
-        st.session_state.setdefault('used_codes', set()).add(code)
-        return True
-    
+        return None
     try:
-        supabase.table('used_codes').insert({'code': code}).execute()
+        result = supabase.table('users').insert({
+            'phone': phone,
+            'credits': credits,
+            'total_queries': 0
+        }).execute()
+        return result.data[0] if result.data else None
+    except Exception:
+        return None
+
+
+def update_user_credits(phone: str, credits: int, total_queries: int = None):
+    """Update user credits (and optionally total_queries)."""
+    if not supabase:
+        return False
+    try:
+        update_data = {'credits': credits}
+        if total_queries is not None:
+            update_data['total_queries'] = total_queries
+            update_data['last_query_at'] = datetime.utcnow().isoformat()
+        supabase.table('users').update(update_data).eq('phone', phone).execute()
         return True
     except Exception:
         return False
 
 
+def add_credits_to_user(phone: str, credits_to_add: int = 1):
+    """Add credits to existing user or create new user."""
+    user = get_user_by_phone(phone)
+    if user:
+        new_credits = user['credits'] + credits_to_add
+        update_user_credits(phone, new_credits)
+        return new_credits
+    else:
+        create_user(phone, credits_to_add)
+        return credits_to_add
+
+
 def is_payment_processed(payment_id: str) -> bool:
-    """Check if a Razorpay payment has already been processed."""
+    """Check if payment already processed."""
     if not supabase:
         return payment_id in st.session_state.get('processed_payments', set())
-    
     try:
         result = supabase.table('payments').select('razorpay_payment_id').eq('razorpay_payment_id', payment_id).execute()
         return len(result.data) > 0
     except Exception:
-        return payment_id in st.session_state.get('processed_payments', set())
+        return False
 
 
-def record_payment(payment_id: str, signature: str, amount: int = 15) -> bool:
-    """Record a successful payment in database."""
+def record_payment(payment_id: str, phone: str, amount: int = 12):
+    """Record payment in database."""
     if not supabase:
         st.session_state.setdefault('processed_payments', set()).add(payment_id)
         return True
-    
     try:
         supabase.table('payments').insert({
             'razorpay_payment_id': payment_id,
-            'razorpay_signature': signature,
+            'phone': phone,
             'amount': amount,
             'status': 'success'
         }).execute()
@@ -142,27 +179,24 @@ def record_payment(payment_id: str, signature: str, amount: int = 15) -> bool:
 
 
 # =============================================================================
-# PAYMENT VERIFICATION
+# RAZORPAY FUNCTIONS
 # =============================================================================
 
-def verify_razorpay_signature(payment_link_id: str, payment_link_ref_id: str, 
-                               payment_link_status: str, razorpay_payment_id: str,
-                               signature: str) -> bool:
-    """Verify Razorpay payment signature."""
+def fetch_phone_from_payment(payment_id: str) -> str:
+    """Fetch phone number from Razorpay payment."""
+    if not razorpay_client:
+        return None
     try:
-        secret = st.secrets["RAZORPAY_KEY_SECRET"]
-    except (KeyError, FileNotFoundError):
-        return True
-    
-    message = f"{payment_link_id}|{payment_link_ref_id}|{payment_link_status}|{razorpay_payment_id}"
-    
-    expected = hmac.new(
-        secret.encode(),
-        message.encode(),
-        hashlib.sha256
-    ).hexdigest()
-    
-    return hmac.compare_digest(expected, signature)
+        payment = razorpay_client.payment.fetch(payment_id)
+        contact = payment.get('contact', '')
+        # Razorpay returns phone with +91, normalize it
+        if contact.startswith('+91'):
+            contact = contact[3:]
+        elif contact.startswith('91') and len(contact) == 12:
+            contact = contact[2:]
+        return contact
+    except Exception:
+        return None
 
 
 def process_razorpay_return():
@@ -173,62 +207,31 @@ def process_razorpay_return():
         return False
     
     payment_id = params.get('razorpay_payment_id', '')
-    signature = params.get('razorpay_signature', '')
-    link_id = params.get('razorpay_payment_link_id', '')
-    ref_id = params.get('razorpay_payment_link_reference_id', '')
-    status = params.get('razorpay_payment_link_status', '')
     
+    # Already processed?
     if is_payment_processed(payment_id):
         st.query_params.clear()
         return False
     
-    if not verify_razorpay_signature(link_id, ref_id, status, payment_id, signature):
-        st.error("Payment verification failed. Contact support on WhatsApp.")
+    # Fetch phone from Razorpay
+    phone = fetch_phone_from_payment(payment_id)
+    if not phone:
+        st.error("Could not fetch payment details. Contact support.")
         st.query_params.clear()
         return False
     
-    if record_payment(payment_id, signature):
-        st.session_state.credits = st.session_state.get('credits', 0) + 1
+    # Record payment and add credit
+    if record_payment(payment_id, phone):
+        new_credits = add_credits_to_user(phone, 1)
+        st.session_state.phone = phone
+        st.session_state.credits = new_credits
+        st.session_state.logged_in = True
         st.session_state.just_paid = True
         st.query_params.clear()
         return True
     
     st.query_params.clear()
     return False
-
-
-# =============================================================================
-# CODE VALIDATION
-# =============================================================================
-
-def get_all_valid_codes():
-    """Load all valid codes (paid + free) from Streamlit secrets."""
-    all_codes = set()
-    try:
-        codes_str = st.secrets.get("CREDIT_CODES", "")
-        all_codes.update(code.strip() for code in codes_str.split(",") if code.strip())
-    except (KeyError, FileNotFoundError):
-        pass
-    try:
-        free_str = st.secrets.get("FREE_CODES", "")
-        all_codes.update(code.strip() for code in free_str.split(",") if code.strip())
-    except (KeyError, FileNotFoundError):
-        pass
-    return all_codes
-
-
-def validate_access_code(code):
-    """Check if access code is valid and unused."""
-    code = code.strip().upper()
-    valid_codes = get_all_valid_codes()
-    
-    if code not in valid_codes:
-        return False, "❌ Invalid code. Please check and try again."
-    
-    if is_code_used(code):
-        return False, "❌ This code has already been used."
-    
-    return True, "✅ Code accepted!"
 
 
 # =============================================================================
@@ -245,7 +248,7 @@ def generate_questions(topic):
         api_key = os.environ.get("ANTHROPIC_API_KEY")
     
     if not api_key:
-        st.error("⚠️ API not configured. Contact support on WhatsApp.")
+        st.error("⚠️ API not configured. Contact support.")
         return None
     
     client = anthropic.Anthropic(api_key=api_key)
@@ -381,11 +384,77 @@ RULES:
 # UI COMPONENTS
 # =============================================================================
 
+def show_terms_and_conditions():
+    """Display T&C with checkbox."""
+    st.markdown("""
+    <div class="tc-box">
+        <strong>Terms & Conditions</strong>
+        <ol>
+            <li><strong>One free query per phone number.</strong> No exceptions.</li>
+            <li><strong>₹12 = 1 query = 10 questions.</strong> Credits don't expire.</li>
+            <li><strong>No refunds</strong> once query is generated. AI costs us money the moment you click generate.</li>
+            <li><strong>We've trained our AI on PYQs, UPSC's style of setting traps, UPSC expectations based on topper analysis, and a lot more.</strong> However, we don't guarantee any exact question will appear in actual exam.</li>
+            <li><strong>Don't share your phone number's credits.</strong> One phone = one user.</li>
+            <li><strong>We store your phone number</strong> only to track your credits. We won't spam or share it.</li>
+        </ol>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def show_phone_entry():
+    """Display phone entry for login/signup."""
+    st.markdown("""
+    <div class="phone-box">
+        <h3 style="margin: 0 0 0.5rem 0; color: #166534;">🎁 Get 1 FREE Query</h3>
+        <p style="margin: 0; color: #15803d; font-size: 0.95rem;">New user? Enter phone to claim your free query.<br/>
+        Returning user? Enter phone to load your credits.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        phone_input = st.text_input(
+            "phone",
+            placeholder="10-digit mobile number",
+            label_visibility="collapsed",
+            max_chars=10
+        )
+        
+        # T&C
+        show_terms_and_conditions()
+        tc_agreed = st.checkbox("I agree to the Terms & Conditions", value=False)
+        
+        if st.button("Continue", use_container_width=True, type="primary"):
+            if not tc_agreed:
+                st.warning("Please agree to the Terms & Conditions.")
+            elif not phone_input or len(phone_input) != 10 or not phone_input.isdigit():
+                st.error("Please enter a valid 10-digit phone number.")
+            else:
+                # Check if user exists
+                user = get_user_by_phone(phone_input)
+                if user:
+                    # Returning user
+                    st.session_state.phone = phone_input
+                    st.session_state.credits = user['credits']
+                    st.session_state.total_queries = user['total_queries']
+                    st.session_state.logged_in = True
+                    st.rerun()
+                else:
+                    # New user - give 1 free credit
+                    create_user(phone_input, credits=1)
+                    st.session_state.phone = phone_input
+                    st.session_state.credits = 1
+                    st.session_state.total_queries = 0
+                    st.session_state.logged_in = True
+                    st.session_state.is_new_user = True
+                    st.rerun()
+
+
 def show_payment_section():
-    """Display Razorpay payment + UPI fallback."""
+    """Display Razorpay payment button."""
     st.markdown("""
     <div class="pay-box">
-        <h3>☕ ₹15 — That's less than your chai</h3>
+        <h3>☕ ₹12 — Less than your chai</h3>
         <p>Pay once. Get 10 practice questions instantly.<br/>
         5 MCQs with traps + 5 Mains with answer frameworks.</p>
     </div>
@@ -395,62 +464,21 @@ def show_payment_section():
     with col2:
         try:
             razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
-            st.link_button("💳 Pay ₹15 — Instant Access", razorpay_url, use_container_width=True, type="primary")
+            st.link_button("💳 Pay ₹12 — Get 1 Query", razorpay_url, use_container_width=True, type="primary")
             st.caption("Secure payment via Razorpay • UPI, Cards, Net Banking")
         except (KeyError, FileNotFoundError):
-            pass
-        
-        st.markdown("---")
-        st.markdown("##### Or pay manually via UPI")
-        st.markdown('<div class="upi-box"><p style="margin:0; color:#166534;"><strong>UPI ID</strong></p></div>', unsafe_allow_html=True)
-        st.code("writernical@sbi", language=None)
-        
-        wa_msg = "Hi, I paid ₹15 for UPSC Predictor. Sending screenshot."
-        st.link_button(
-            "💬 Send Screenshot on WhatsApp",
-            f"https://wa.me/919150801098?text={wa_msg.replace(' ', '%20')}",
-            use_container_width=True
-        )
-        st.caption("Manual verification within 15 minutes.")
-
-
-def show_code_entry():
-    """Display the access code entry box."""
-    st.markdown("""
-    <div class="code-box">
-        <p style="margin:0; color:#0369a1; font-size: 1rem;"><strong>🔑 Have a code? Enter below to unlock your questions.</strong></p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        code_input = st.text_input(
-            "access_code",
-            placeholder="e.g. UPSC-79CV or FREE-7ZAV",
-            label_visibility="collapsed",
-            max_chars=10
-        )
-        
-        if st.button("🔓 Redeem Code", use_container_width=True, type="primary"):
-            if code_input:
-                valid, msg = validate_access_code(code_input)
-                if valid:
-                    code_upper = code_input.strip().upper()
-                    if mark_code_used(code_upper):
-                        st.session_state.credits = st.session_state.get('credits', 0) + 1
-                        st.session_state.just_paid = True
-                        st.rerun()
-                    else:
-                        st.error("❌ Could not redeem code. Try again or contact support.")
-                else:
-                    st.error(msg)
-            else:
-                st.warning("Please enter your access code.")
+            st.error("Payment not configured. Contact support.")
 
 
 # =============================================================================
 # SESSION STATE
 # =============================================================================
+
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+
+if 'phone' not in st.session_state:
+    st.session_state.phone = None
 
 if 'credits' not in st.session_state:
     st.session_state.credits = 0
@@ -461,9 +489,12 @@ if 'total_queries' not in st.session_state:
 if 'just_paid' not in st.session_state:
     st.session_state.just_paid = False
 
+if 'is_new_user' not in st.session_state:
+    st.session_state.is_new_user = False
+
 
 # =============================================================================
-# PROCESS RAZORPAY RETURN (before rendering UI)
+# PROCESS RAZORPAY RETURN
 # =============================================================================
 
 process_razorpay_return()
@@ -474,16 +505,38 @@ process_razorpay_return()
 # =============================================================================
 
 with st.sidebar:
-    st.markdown("### Your Session")
-    if st.session_state.credits > 0:
-        st.success(f"✅ **{st.session_state.credits}** query ready")
+    st.markdown("### Your Account")
+    
+    if st.session_state.logged_in:
+        st.markdown(f"📱 **{st.session_state.phone}**")
+        if st.session_state.credits > 0:
+            st.success(f"✅ **{st.session_state.credits}** query ready")
+        else:
+            st.warning("⚡ No queries left")
+        st.markdown(f"Total queries used: **{st.session_state.total_queries}**")
+        
+        st.markdown("---")
+        
+        # Buy Credits button
+        try:
+            razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
+            st.link_button("💳 Buy Credits (₹12)", razorpay_url, use_container_width=True)
+        except:
+            pass
+        
+        st.markdown("---")
+        
+        if st.button("Logout", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.phone = None
+            st.session_state.credits = 0
+            st.rerun()
     else:
-        st.warning("⚡ No queries left")
-    st.markdown(f"Queries used: **{st.session_state.total_queries}**")
+        st.info("Enter phone number to start")
+    
     st.markdown("---")
-    st.markdown("**₹15 per query**")
-    st.markdown("---")
-    st.markdown("[💬 WhatsApp Support](https://wa.me/919150801098)")
+    st.markdown("**Follow Us**")
+    st.markdown("[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white)](https://www.youtube.com/channel/UCMVxFvBmNwIdLFdq65yqTFg) [![Instagram](https://img.shields.io/badge/Instagram-E4405F?style=flat&logo=instagram&logoColor=white)](https://www.instagram.com/upscpredictor.in)")
 
 
 # =============================================================================
@@ -501,16 +554,23 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+# Status banners
 if st.session_state.just_paid:
-    st.markdown('<div class="paid-banner"><h3>✅ Payment successful! Enter your topic below.</h3></div>', unsafe_allow_html=True)
+    st.markdown('<div class="paid-banner"><h3>✅ Payment successful! Credit added to your account.</h3></div>', unsafe_allow_html=True)
     st.session_state.just_paid = False
 
+if st.session_state.get('is_new_user'):
+    st.markdown('<div class="paid-banner"><h3>🎁 Welcome! You have 1 FREE query. Use it wisely!</h3></div>', unsafe_allow_html=True)
+    st.session_state.is_new_user = False
+
 
 # =============================================================================
-# PROBLEM + FEATURES
+# MAIN CONTENT
 # =============================================================================
 
-if st.session_state.total_queries == 0:
+if not st.session_state.logged_in:
+    # ── NOT LOGGED IN: SHOW FEATURES + PHONE ENTRY ──
+    
     st.markdown("""
     <div class="problem-box">
         <p><strong>The frustration you know too well:</strong> You read about "Governor delays NEET Bill" and file it under Polity. 
@@ -535,66 +595,64 @@ if st.session_state.total_queries == 0:
     with c3:
         st.markdown('<div class="feature-card"><h4>📋 Answer Frameworks</h4><p>Word allocation, must-include cases, committees, articles — and balanced conclusions that examiners want to see.</p></div>', unsafe_allow_html=True)
     
-    st.markdown("""
-    <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 1.2rem; border-radius: 10px; text-align: center; margin: 1.5rem 0;">
-        <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem;">🎁 Try it FREE — use one of these codes below</h3>
-        <p style="margin: 0; font-size: 1.3rem; font-weight: 700; letter-spacing: 2px;">FREE-7ZAV &nbsp; &nbsp; FREE-3945</p>
-        <p style="margin: 0.5rem 0 0 0; font-size: 0.85rem; opacity: 0.9;">Limited codes • First come, first served</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-# =============================================================================
-# MAIN
-# =============================================================================
-
-st.markdown("---")
-
-show_code_entry()
-
-if st.session_state.credits > 0:
     st.markdown("---")
-    st.markdown("### Enter Any Current Affairs Topic")
-    
-    topic_text = st.text_area(
-        "topic",
-        placeholder="Examples:\n• RBI holds repo rate at 6.5%\n• India-China LAC disengagement begins\n• Supreme Court on bulldozer justice\n• Governor delays NEET bill in Tamil Nadu",
-        height=100,
-        label_visibility="collapsed"
-    )
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        clicked = st.button("🚀 Generate 10 Questions", use_container_width=True, type="primary")
-    
-    if clicked:
-        if not topic_text or len(topic_text.strip()) < 5:
-            st.warning("Please enter a topic (at least a few words)")
-        else:
-            output = generate_questions(topic_text)
-            if output:
-                st.session_state.credits -= 1
-                st.session_state.total_queries += 1
-                
-                st.markdown("---")
-                st.markdown("## ✅ Your Practice Questions")
-                st.markdown(f'<div class="output-box"><pre style="white-space:pre-wrap; font-family:system-ui,-apple-system,sans-serif; font-size:0.9rem; line-height:1.7; color:#1e293b;">{output}</pre></div>', unsafe_allow_html=True)
-                
-                st.download_button(
-                    "📥 Download as Text File", output,
-                    f"upsc_questions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain"
-                )
-                
-                if st.session_state.credits == 0:
-                    st.markdown("---")
-                    st.info("🎯 **Liked it?** Pay ₹15 for your next set of 10 questions.")
-                    show_payment_section()
-                
-                st.balloons()
+    show_phone_entry()
+
 else:
-    st.markdown("---")
-    show_payment_section()
+    # ── LOGGED IN ──
+    
+    if st.session_state.credits > 0:
+        # ── HAS CREDITS: SHOW INPUT ──
+        st.markdown("### Enter Any Current Affairs Topic")
+        
+        topic_text = st.text_area(
+            "topic",
+            placeholder="Examples:\n• RBI holds repo rate at 6.5%\n• India-China LAC disengagement begins\n• Supreme Court on bulldozer justice\n• Governor delays NEET bill in Tamil Nadu",
+            height=100,
+            label_visibility="collapsed"
+        )
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            clicked = st.button("🚀 Generate 10 Questions", use_container_width=True, type="primary")
+        
+        if clicked:
+            if not topic_text or len(topic_text.strip()) < 5:
+                st.warning("Please enter a topic (at least a few words)")
+            else:
+                output = generate_questions(topic_text)
+                if output:
+                    # Update session
+                    st.session_state.credits -= 1
+                    st.session_state.total_queries += 1
+                    
+                    # Update database
+                    update_user_credits(
+                        st.session_state.phone,
+                        st.session_state.credits,
+                        st.session_state.total_queries
+                    )
+                    
+                    st.markdown("---")
+                    st.markdown("## ✅ Your Practice Questions")
+                    st.markdown(f'<div class="output-box"><pre style="white-space:pre-wrap; font-family:system-ui,-apple-system,sans-serif; font-size:0.9rem; line-height:1.7; color:#1e293b;">{output}</pre></div>', unsafe_allow_html=True)
+                    
+                    st.download_button(
+                        "📥 Download as Text File", output,
+                        f"upsc_questions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                        mime="text/plain"
+                    )
+                    
+                    if st.session_state.credits == 0:
+                        st.markdown("---")
+                        st.info("🎯 **Liked it?** Get more queries for ₹12 each.")
+                        show_payment_section()
+                    
+                    st.balloons()
+    else:
+        # ── NO CREDITS: SHOW PAYMENT ──
+        st.markdown("### You're out of credits!")
+        show_payment_section()
 
 
 # =============================================================================
@@ -602,7 +660,7 @@ else:
 # =============================================================================
 
 st.markdown("---")
-with st.expander("📄 See a sample output — what you get for ₹15"):
+with st.expander("📄 See a sample output — what you get"):
     st.markdown("""
 **Input:** *Governor returns NEET bill*
 
@@ -670,6 +728,10 @@ st.markdown("""
 <div class="footer">
     <p><strong>UPSC Multi-Angle Predictor</strong></p>
     <p>For aspirants who read the newspaper but want exam-ready practice.</p>
-    <p style="font-size: 0.8rem; margin-top: 0.5rem;">₹15 per query — less than your chai ☕</p>
+    <div class="social-links">
+        <a href="https://www.youtube.com/channel/UCMVxFvBmNwIdLFdq65yqTFg" target="_blank">📺 YouTube</a>
+        <a href="https://www.instagram.com/upscpredictor.in" target="_blank">📸 Instagram</a>
+    </div>
+    <p style="font-size: 0.8rem; margin-top: 1rem;">₹12 per query — less than your chai ☕</p>
 </div>
 """, unsafe_allow_html=True)
