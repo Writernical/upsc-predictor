@@ -691,21 +691,25 @@ def show_payment_section():
             # Razorpay checkout HTML/JS
             checkout_html = f"""
             <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-            <button id="rzp-button" style="
-                background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-                color: white;
-                border: none;
-                padding: 12px 24px;
-                font-size: 16px;
-                font-weight: 600;
-                border-radius: 8px;
-                cursor: pointer;
-                width: 100%;
-                margin: 10px 0;
-            ">💳 Pay ₹12 — Get 1 Query</button>
-            <p style="text-align: center; color: #64748b; font-size: 12px; margin-top: 8px;">
-                Secure payment via Razorpay • UPI, Cards, Net Banking
-            </p>
+            <div style="display: flex; flex-direction: column; align-items: center; padding: 20px;">
+                <button id="rzp-button" style="
+                    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+                    color: white;
+                    border: none;
+                    padding: 16px 32px;
+                    font-size: 18px;
+                    font-weight: 600;
+                    border-radius: 10px;
+                    cursor: pointer;
+                    width: 100%;
+                    max-width: 300px;
+                    margin: 10px 0;
+                    box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
+                ">💳 Pay ₹12 — Get 1 Query</button>
+                <p style="text-align: center; color: #64748b; font-size: 13px; margin-top: 12px;">
+                    Secure payment via Razorpay • UPI, Cards, Net Banking
+                </p>
+            </div>
             <script>
             var options = {{
                 "key": "{key_id}",
@@ -720,7 +724,6 @@ def show_payment_section():
                     "color": "#3b82f6"
                 }},
                 "handler": function (response) {{
-                    // Payment successful - reload page with payment ID
                     window.location.href = window.location.origin + window.location.pathname + 
                         "?razorpay_payment_id=" + response.razorpay_payment_id;
                 }}
@@ -733,7 +736,7 @@ def show_payment_section():
             </script>
             """
             
-            components.html(checkout_html, height=120)
+            components.html(checkout_html, height=150)
             
         except Exception as e:
             st.error(f"Payment error: {str(e)}")
