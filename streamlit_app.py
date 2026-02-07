@@ -1,15 +1,15 @@
 """
-UPSC MULTI-ANGLE PREDICTOR v7.0
+UPSC MULTI-ANGLE PREDICTOR v8.0
 ================================
-- Phone-first: 1 free query per phone (no loophole)
-- Razorpay: Auto-fetch phone from payment, save credit to DB
+- Email OTP authentication (free via Resend)
+- No phone verification
 - ₹12 per query
-- T&C before first use
 
 STREAMLIT SECRETS:
     ANTHROPIC_API_KEY = "sk-ant-..."
     SUPABASE_URL = "https://xxxxx.supabase.co"
     SUPABASE_KEY = "eyJhbG..."
+    RESEND_API_KEY = "re_xxxxx"
     RAZORPAY_KEY_ID = "rzp_live_xxxxx"
     RAZORPAY_KEY_SECRET = "xxxxxxxxxxxxx"
     RAZORPAY_PAYMENT_URL = "https://rzp.io/rzp/xxxxx"
@@ -18,8 +18,9 @@ STREAMLIT SECRETS:
 import streamlit as st
 import anthropic
 import requests
+import random
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from supabase import create_client
 
 # =============================================================================
@@ -33,7 +34,7 @@ st.set_page_config(
 )
 
 # =============================================================================
-# CLIENTS
+# SUPABASE CLIENT
 # =============================================================================
 
 @st.cache_resource
@@ -43,7 +44,7 @@ def get_supabase_client():
         key = st.secrets["SUPABASE_KEY"]
         return create_client(url, key)
     except Exception as e:
-        st.error(f"Supabase init error: {str(e)}")
+        st.error(f"Database error: {str(e)}")
         return None
 
 supabase = get_supabase_client()
@@ -71,7 +72,7 @@ st.markdown("""
     .feature-card h4 { margin: 0 0 0.5rem 0; color: #334155; font-size: 0.95rem; }
     .feature-card p { margin: 0; color: #64748b; font-size: 0.85rem; line-height: 1.5; }
     .output-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.5rem; margin: 1rem 0; }
-    .phone-box { background: #f0fdf4; border: 2px solid #22c55e; border-radius: 12px; padding: 1.5rem; text-align: center; margin: 1.5rem 0; }
+    .email-box { background: #f0fdf4; border: 2px solid #22c55e; border-radius: 12px; padding: 1.5rem; text-align: center; margin: 1.5rem 0; }
     .footer { text-align: center; padding: 2rem 1rem; color: #94a3b8; font-size: 0.85rem; border-top: 1px solid #e2e8f0; margin-top: 2rem; }
     .social-links { margin-top: 1rem; }
     .social-links a { margin: 0 10px; text-decoration: none; font-size: 1.5rem; }
@@ -85,97 +86,167 @@ st.markdown("""
 
 
 # =============================================================================
-# DATABASE FUNCTIONS
+# EMAIL / OTP FUNCTIONS
 # =============================================================================
 
-def get_user_by_phone(phone: str):
-    """Get user record by phone number."""
-    phone = normalize_phone(phone)
-    if not phone:
-        return None
+def generate_otp():
+    """Generate 6-digit OTP."""
+    return str(random.randint(100000, 999999))
+
+
+def send_otp_email(email: str, otp: str) -> bool:
+    """Send OTP via Resend."""
+    try:
+        api_key = st.secrets["RESEND_API_KEY"]
+        
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "from": "UPSC Predictor <onboarding@resend.dev>",
+                "to": email,
+                "subject": "Your OTP for UPSC Predictor",
+                "html": f"""
+                <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
+                    <h2 style="color: #1e293b;">UPSC Predictor</h2>
+                    <p>Your verification code is:</p>
+                    <div style="background: #f0f9ff; border: 2px solid #38bdf8; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
+                        <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #0369a1;">{otp}</span>
+                    </div>
+                    <p style="color: #64748b; font-size: 14px;">This code expires in 10 minutes.</p>
+                    <p style="color: #64748b; font-size: 14px;">If you didn't request this, please ignore this email.</p>
+                </div>
+                """
+            }
+        )
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def save_otp(email: str, otp: str) -> bool:
+    """Save OTP to database."""
+    if not supabase:
+        return False
+    try:
+        expires_at = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+        supabase.table('otp_codes').insert({
+            'email': email.lower().strip(),
+            'otp': otp,
+            'expires_at': expires_at,
+            'used': False
+        }).execute()
+        return True
+    except Exception:
+        return False
+
+
+def verify_otp(email: str, otp: str) -> bool:
+    """Verify OTP from database."""
+    if not supabase:
+        return False
+    try:
+        email = email.lower().strip()
+        result = supabase.table('otp_codes').select('*').eq('email', email).eq('otp', otp).eq('used', False).execute()
+        
+        if not result.data:
+            return False
+        
+        otp_record = result.data[0]
+        expires_at = datetime.fromisoformat(otp_record['expires_at'].replace('Z', '+00:00'))
+        
+        if datetime.now(expires_at.tzinfo) > expires_at:
+            return False
+        
+        # Mark OTP as used
+        supabase.table('otp_codes').update({'used': True}).eq('id', otp_record['id']).execute()
+        return True
+    except Exception:
+        return False
+
+
+# =============================================================================
+# USER FUNCTIONS
+# =============================================================================
+
+def get_user_by_email(email: str):
+    """Get user by email."""
     if not supabase:
         return None
     try:
-        result = supabase.table('users').select('*').eq('phone', phone).execute()
+        email = email.lower().strip()
+        result = supabase.table('users').select('*').eq('email', email).execute()
         return result.data[0] if result.data else None
     except Exception:
         return None
 
 
-def create_user(phone: str):
+def create_user(email: str):
     """Create new user with 1 free credit."""
-    phone = normalize_phone(phone)
-    if not phone:
-        return None
     if not supabase:
-        st.error("Database not connected")
         return None
     try:
+        email = email.lower().strip()
         result = supabase.table('users').insert({
-            'phone': phone,
+            'email': email,
             'free_credits': 1,
             'paid_credits': 0,
-            'total_queries': 0
+            'total_queries': 0,
+            'email_verified': True
         }).execute()
         return result.data[0] if result.data else None
-    except Exception as e:
-        st.error(f"DB Error: {str(e)}")
+    except Exception:
         return None
 
 
-def update_user_credits(phone: str, free_credits: int, paid_credits: int, total_queries: int = None):
+def update_user_credits(email: str, free_credits: int, paid_credits: int, total_queries: int = None):
     """Update user credits."""
-    phone = normalize_phone(phone)
-    if not phone:
-        return False
     if not supabase:
         return False
     try:
+        email = email.lower().strip()
         update_data = {'free_credits': free_credits, 'paid_credits': paid_credits}
         if total_queries is not None:
             update_data['total_queries'] = total_queries
             update_data['last_query_at'] = datetime.utcnow().isoformat()
-        result = supabase.table('users').update(update_data).eq('phone', phone).execute()
+        supabase.table('users').update(update_data).eq('email', email).execute()
         return True
-    except Exception as e:
-        st.error(f"Update error: {str(e)}")
+    except Exception:
         return False
 
 
-def add_paid_credits(phone: str, credits_to_add: int = 1):
+def add_paid_credits(email: str, credits_to_add: int = 1):
     """Add paid credits to user."""
-    phone = normalize_phone(phone)
-    if not phone:
-        st.error("Invalid phone from payment")
-        return 0
-    
-    user = get_user_by_phone(phone)
-    st.info(f"Debug add_paid: Found user = {user}")
+    email = email.lower().strip()
+    user = get_user_by_email(email)
     
     if user:
         new_paid = user.get('paid_credits', 0) + credits_to_add
-        new_free = user.get('free_credits', 0)
-        st.info(f"Debug add_paid: Updating to free={new_free}, paid={new_paid}")
-        success = update_user_credits(phone, new_free, new_paid)
-        st.info(f"Debug add_paid: Update success = {success}")
+        update_user_credits(email, user.get('free_credits', 0), new_paid)
         return new_paid
     else:
-        # User doesn't exist yet - create with paid credit
-        st.info(f"Debug add_paid: Creating new user with phone {phone}")
+        # Create user with paid credit (no free credit since they paid first)
         if not supabase:
             return 0
         try:
             supabase.table('users').insert({
-                'phone': phone,
-                'free_credits': 1,
+                'email': email,
+                'free_credits': 0,
                 'paid_credits': credits_to_add,
-                'total_queries': 0
+                'total_queries': 0,
+                'email_verified': True
             }).execute()
             return credits_to_add
-        except Exception as e:
-            st.error(f"Could not add credits: {str(e)}")
+        except Exception:
             return 0
 
+
+# =============================================================================
+# PAYMENT FUNCTIONS
+# =============================================================================
 
 def is_payment_processed(payment_id: str) -> bool:
     """Check if payment already processed."""
@@ -188,16 +259,15 @@ def is_payment_processed(payment_id: str) -> bool:
         return False
 
 
-def record_payment(payment_id: str, phone: str, amount: int = 12):
+def record_payment(payment_id: str, email: str, amount: int = 12):
     """Record payment in database."""
-    phone = normalize_phone(phone)
     if not supabase:
         st.session_state.setdefault('processed_payments', set()).add(payment_id)
         return True
     try:
         supabase.table('payments').insert({
             'razorpay_payment_id': payment_id,
-            'phone': phone,
+            'email': email.lower().strip(),
             'amount': amount,
             'status': 'success'
         }).execute()
@@ -206,29 +276,8 @@ def record_payment(payment_id: str, phone: str, amount: int = 12):
         return False
 
 
-# =============================================================================
-# RAZORPAY FUNCTIONS
-# =============================================================================
-
-def normalize_phone(phone: str) -> str:
-    """Normalize phone to 10 digits only."""
-    if not phone:
-        return None
-    # Remove all non-digits
-    phone = ''.join(filter(str.isdigit, phone))
-    # Remove country code if present
-    if phone.startswith('91') and len(phone) == 12:
-        phone = phone[2:]
-    if phone.startswith('0') and len(phone) == 11:
-        phone = phone[1:]
-    # Validate 10 digits
-    if len(phone) == 10:
-        return phone
-    return None
-
-
-def fetch_phone_from_payment(payment_id: str) -> str:
-    """Fetch phone number from Razorpay payment using API."""
+def fetch_email_from_payment(payment_id: str) -> str:
+    """Fetch email from Razorpay payment."""
     try:
         key_id = st.secrets["RAZORPAY_KEY_ID"]
         key_secret = st.secrets["RAZORPAY_KEY_SECRET"]
@@ -240,8 +289,7 @@ def fetch_phone_from_payment(payment_id: str) -> str:
         
         if response.status_code == 200:
             payment = response.json()
-            contact = payment.get('contact', '')
-            return normalize_phone(contact)
+            return payment.get('email', '').lower().strip()
         return None
     except Exception:
         return None
@@ -256,32 +304,22 @@ def process_razorpay_return():
     
     payment_id = params.get('razorpay_payment_id', '')
     
-    # Already processed?
     if is_payment_processed(payment_id):
         st.query_params.clear()
         return False
     
-    # Fetch phone from Razorpay
-    phone = fetch_phone_from_payment(payment_id)
-    st.info(f"Debug: Phone from Razorpay = {phone}")
-    
-    if not phone:
+    email = fetch_email_from_payment(payment_id)
+    if not email:
         st.error("Could not fetch payment details. Contact support.")
         st.query_params.clear()
         return False
     
-    # Record payment
-    if record_payment(payment_id, phone):
-        # Add paid credit
-        new_paid = add_paid_credits(phone, 1)
-        st.info(f"Debug: Added credits. New paid = {new_paid}")
-        
-        # Fetch updated user
-        user = get_user_by_phone(phone)
-        st.info(f"Debug: User from DB = {user}")
+    if record_payment(payment_id, email):
+        add_paid_credits(email, 1)
+        user = get_user_by_email(email)
         
         if user:
-            st.session_state.phone = phone
+            st.session_state.email = email
             st.session_state.free_credits = user.get('free_credits', 0)
             st.session_state.paid_credits = user.get('paid_credits', 0)
             st.session_state.total_queries = user.get('total_queries', 0)
@@ -445,91 +483,121 @@ RULES:
 # =============================================================================
 
 def show_terms_and_conditions():
-    """Display T&C with checkbox."""
+    """Display T&C."""
     st.markdown("""
     <div class="tc-box">
         <strong>Terms & Conditions</strong>
         <ol>
-            <li><strong>One free query per phone number.</strong> No exceptions.</li>
+            <li><strong>One free query per email.</strong> No exceptions.</li>
             <li><strong>₹12 = 1 query = 10 questions.</strong> Credits don't expire.</li>
             <li><strong>No refunds</strong> once query is generated. AI costs us money the moment you click generate.</li>
             <li><strong>We've trained our AI on PYQs, UPSC's style of setting traps, UPSC expectations based on topper analysis, and a lot more.</strong> However, we don't guarantee any exact question will appear in actual exam.</li>
-            <li><strong>Don't share your phone number's credits.</strong> One phone = one user.</li>
-            <li><strong>We store your phone number</strong> only to track your credits. We won't spam or share it.</li>
+            <li><strong>Don't share your account.</strong> One email = one user.</li>
+            <li><strong>We store your email</strong> only to track your credits. We won't spam.</li>
         </ol>
     </div>
     """, unsafe_allow_html=True)
 
 
-def show_phone_entry():
-    """Display phone entry for login/signup."""
+def show_email_entry():
+    """Display email + OTP entry."""
     st.markdown("""
-    <div class="phone-box">
+    <div class="email-box">
         <h3 style="margin: 0 0 0.5rem 0; color: #166534;">🎁 Get 1 FREE Query</h3>
-        <p style="margin: 0; color: #15803d; font-size: 0.95rem;">New user? Enter phone to claim your free query.<br/>
-        Returning user? Enter phone to load your credits.</p>
+        <p style="margin: 0; color: #15803d; font-size: 0.95rem;">New user? Verify email to claim your free query.<br/>
+        Returning user? Login to load your credits.</p>
     </div>
     """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        phone_input = st.text_input(
-            "phone",
-            placeholder="10-digit mobile number",
-            label_visibility="collapsed",
-            max_chars=10
+        # Step 1: Email entry
+        email_input = st.text_input(
+            "email",
+            placeholder="your.email@gmail.com",
+            label_visibility="collapsed"
         )
         
-        # T&C
-        show_terms_and_conditions()
-        tc_agreed = st.checkbox("I agree to the Terms & Conditions", value=False)
+        # OTP state management
+        if 'otp_sent' not in st.session_state:
+            st.session_state.otp_sent = False
+        if 'otp_email' not in st.session_state:
+            st.session_state.otp_email = None
         
-        if st.button("Continue", use_container_width=True, type="primary"):
-            if not tc_agreed:
-                st.warning("Please agree to the Terms & Conditions.")
-            elif not phone_input or len(phone_input) != 10 or not phone_input.isdigit():
-                st.error("Please enter a valid 10-digit phone number.")
-            else:
-                # Normalize phone
-                phone = normalize_phone(phone_input)
-                if not phone:
-                    st.error("Invalid phone number format.")
+        if not st.session_state.otp_sent:
+            # Show T&C and Send OTP button
+            show_terms_and_conditions()
+            tc_agreed = st.checkbox("I agree to the Terms & Conditions", value=False)
+            
+            if st.button("📧 Send OTP", use_container_width=True, type="primary"):
+                if not tc_agreed:
+                    st.warning("Please agree to the Terms & Conditions.")
+                elif not email_input or '@' not in email_input or '.' not in email_input:
+                    st.error("Please enter a valid email address.")
                 else:
-                    # Check if user exists
-                    user = get_user_by_phone(phone)
-                    if user:
-                        # Returning user - load credits from DB only
-                        st.session_state.phone = phone
-                        st.session_state.free_credits = user.get('free_credits', 0)
-                        st.session_state.paid_credits = user.get('paid_credits', 0)
-                        st.session_state.total_queries = user.get('total_queries', 0)
-                        st.session_state.logged_in = True
+                    # Generate and send OTP
+                    otp = generate_otp()
+                    if save_otp(email_input, otp) and send_otp_email(email_input, otp):
+                        st.session_state.otp_sent = True
+                        st.session_state.otp_email = email_input.lower().strip()
                         st.rerun()
                     else:
-                        # New user - try to create with 1 free credit
-                        new_user = create_user(phone)
-                        if new_user:
-                            # Successfully created - give free credit
-                            st.session_state.phone = phone
+                        st.error("Could not send OTP. Please try again.")
+        else:
+            # Show OTP entry
+            st.success(f"✅ OTP sent to {st.session_state.otp_email}")
+            st.markdown("""
+            <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 0.75rem; margin: 0.5rem 0;">
+                <p style="margin: 0; color: #92400e; font-size: 0.9rem;">📬 <strong>Don't see the email?</strong> Check your <strong>Spam/Junk folder</strong>. The email comes from "UPSC Predictor".</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            otp_input = st.text_input(
+                "otp",
+                placeholder="Enter 6-digit OTP",
+                label_visibility="collapsed",
+                max_chars=6
+            )
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("✓ Verify OTP", use_container_width=True, type="primary"):
+                    if not otp_input or len(otp_input) != 6:
+                        st.error("Please enter 6-digit OTP.")
+                    elif verify_otp(st.session_state.otp_email, otp_input):
+                        # OTP verified - login or create user
+                        email = st.session_state.otp_email
+                        user = get_user_by_email(email)
+                        
+                        if user:
+                            # Returning user
+                            st.session_state.email = email
+                            st.session_state.free_credits = user.get('free_credits', 0)
+                            st.session_state.paid_credits = user.get('paid_credits', 0)
+                            st.session_state.total_queries = user.get('total_queries', 0)
+                            st.session_state.logged_in = True
+                        else:
+                            # New user
+                            create_user(email)
+                            st.session_state.email = email
                             st.session_state.free_credits = 1
                             st.session_state.paid_credits = 0
                             st.session_state.total_queries = 0
                             st.session_state.logged_in = True
                             st.session_state.is_new_user = True
-                            st.rerun()
-                        else:
-                            # Creation failed - maybe race condition, check again
-                            user = get_user_by_phone(phone)
-                            if user:
-                                # User was created in parallel, load their data
-                                st.session_state.phone = phone
-                                st.session_state.free_credits = user.get('free_credits', 0)
-                                st.session_state.paid_credits = user.get('paid_credits', 0)
-                                st.session_state.total_queries = user.get('total_queries', 0)
-                                st.session_state.logged_in = True
-                                st.rerun()
-                            else:
-                                st.error("Could not create account. Please try again.")
+                        
+                        # Reset OTP state
+                        st.session_state.otp_sent = False
+                        st.session_state.otp_email = None
+                        st.rerun()
+                    else:
+                        st.error("Invalid or expired OTP. Please try again.")
+            
+            with col_b:
+                if st.button("← Change Email", use_container_width=True):
+                    st.session_state.otp_sent = False
+                    st.session_state.otp_email = None
+                    st.rerun()
 
 
 def show_payment_section():
@@ -544,6 +612,7 @@ def show_payment_section():
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
+        st.warning("⚠️ **Important:** Use the SAME EMAIL in Razorpay checkout that you used to login here.")
         try:
             razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
             st.link_button("💳 Pay ₹12 — Get 1 Query", razorpay_url, use_container_width=True, type="primary")
@@ -559,8 +628,8 @@ def show_payment_section():
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 
-if 'phone' not in st.session_state:
-    st.session_state.phone = None
+if 'email' not in st.session_state:
+    st.session_state.email = None
 
 if 'free_credits' not in st.session_state:
     st.session_state.free_credits = 0
@@ -593,9 +662,8 @@ with st.sidebar:
     st.markdown("### Your Session")
     
     if st.session_state.logged_in:
-        st.markdown(f"📱 {st.session_state.phone}")
+        st.markdown(f"📧 {st.session_state.email}")
         
-        # Show credits separately
         total_credits = st.session_state.free_credits + st.session_state.paid_credits
         if total_credits > 0:
             st.success(f"✅ **{total_credits}** query ready")
@@ -611,7 +679,6 @@ with st.sidebar:
         
         st.markdown("---")
         
-        # Buy Credits button
         try:
             razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
             st.link_button("💳 Buy Credits", razorpay_url, use_container_width=True)
@@ -620,12 +687,14 @@ with st.sidebar:
         
         if st.button("Logout", use_container_width=True):
             st.session_state.logged_in = False
-            st.session_state.phone = None
+            st.session_state.email = None
             st.session_state.free_credits = 0
             st.session_state.paid_credits = 0
+            st.session_state.otp_sent = False
+            st.session_state.otp_email = None
             st.rerun()
     else:
-        st.markdown("👇 **Enter phone below to start**")
+        st.markdown("👇 **Enter email below to start**")
         st.markdown("---")
         st.markdown("**₹12 per query**")
         st.markdown("*1 FREE query for new users*")
@@ -665,7 +734,7 @@ if st.session_state.get('is_new_user'):
 # =============================================================================
 
 if not st.session_state.logged_in:
-    # ── NOT LOGGED IN: SHOW FEATURES + PHONE ENTRY ──
+    # ── NOT LOGGED IN ──
     
     st.markdown("""
     <div class="problem-box">
@@ -692,7 +761,7 @@ if not st.session_state.logged_in:
         st.markdown('<div class="feature-card"><h4>📋 Answer Frameworks</h4><p>Word allocation, must-include cases, committees, articles — and balanced conclusions that examiners want to see.</p></div>', unsafe_allow_html=True)
     
     st.markdown("---")
-    show_phone_entry()
+    show_email_entry()
 
 else:
     # ── LOGGED IN ──
@@ -700,7 +769,6 @@ else:
     total_credits = st.session_state.free_credits + st.session_state.paid_credits
     
     if total_credits > 0:
-        # ── HAS CREDITS: SHOW INPUT ──
         st.markdown("### Enter Any Current Affairs Topic")
         
         topic_text = st.text_area(
@@ -730,7 +798,7 @@ else:
                     
                     # Update database
                     update_user_credits(
-                        st.session_state.phone,
+                        st.session_state.email,
                         st.session_state.free_credits,
                         st.session_state.paid_credits,
                         st.session_state.total_queries
@@ -754,7 +822,6 @@ else:
                     
                     st.balloons()
     else:
-        # ── NO CREDITS: SHOW PAYMENT ──
         st.markdown("### You're out of credits!")
         show_payment_section()
 
