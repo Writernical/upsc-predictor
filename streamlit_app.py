@@ -16,10 +16,12 @@ STREAMLIT SECRETS:
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import anthropic
 import requests
 import random
 import os
+import time
 from datetime import datetime, timedelta
 from supabase import create_client
 
@@ -292,7 +294,6 @@ def check_and_credit_pending_payments(email: str) -> int:
         key_secret = st.secrets["RAZORPAY_KEY_SECRET"]
         
         # Fetch recent payments from Razorpay (last 24 hours)
-        import time
         from_timestamp = int(time.time()) - 86400  # 24 hours ago
         
         response = requests.get(
@@ -350,7 +351,7 @@ def fetch_email_from_payment(payment_id: str) -> str:
 
 
 def process_razorpay_return():
-    """Process Razorpay redirect after payment (for Checkout integration)."""
+    """Process Razorpay redirect after payment - auto-login user."""
     params = st.query_params
     
     if 'razorpay_payment_id' not in params:
@@ -359,14 +360,26 @@ def process_razorpay_return():
     payment_id = params.get('razorpay_payment_id', '')
     
     if is_payment_processed(payment_id):
+        # Already processed - but still login user
+        email = fetch_email_from_payment(payment_id)
+        if email:
+            user = get_user_by_email(email)
+            if user:
+                st.session_state.email = email
+                st.session_state.free_credits = user.get('free_credits', 0)
+                st.session_state.paid_credits = user.get('paid_credits', 0)
+                st.session_state.total_queries = user.get('total_queries', 0)
+                st.session_state.logged_in = True
         st.query_params.clear()
         return False
     
+    # Fetch email from Razorpay
     email = fetch_email_from_payment(payment_id)
     if not email:
         st.query_params.clear()
         return False
     
+    # Record payment and add credit
     if record_payment(payment_id, email):
         add_paid_credits(email, 1)
         user = get_user_by_email(email)
@@ -660,7 +673,7 @@ def show_email_entry():
 
 
 def show_payment_section():
-    """Display Razorpay payment button."""
+    """Display Razorpay embedded checkout."""
     st.markdown("""
     <div class="pay-box">
         <h3>☕ ₹12 — Less than your chai</h3>
@@ -669,15 +682,64 @@ def show_payment_section():
     </div>
     """, unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.info("💡 **After payment:** Login again with the **same email** you used in Razorpay. Credits will be added automatically.")
+    # If user is logged in, show embedded checkout
+    if st.session_state.logged_in:
         try:
-            razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
-            st.link_button("💳 Pay ₹12 — Get 1 Query", razorpay_url, use_container_width=True, type="primary")
-            st.caption("Secure payment via Razorpay • UPI, Cards, Net Banking")
-        except (KeyError, FileNotFoundError):
-            st.error("Payment not configured. Contact support.")
+            key_id = st.secrets["RAZORPAY_KEY_ID"]
+            user_email = st.session_state.email
+            
+            # Razorpay checkout HTML/JS
+            checkout_html = f"""
+            <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+            <button id="rzp-button" style="
+                background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                font-size: 16px;
+                font-weight: 600;
+                border-radius: 8px;
+                cursor: pointer;
+                width: 100%;
+                margin: 10px 0;
+            ">💳 Pay ₹12 — Get 1 Query</button>
+            <p style="text-align: center; color: #64748b; font-size: 12px; margin-top: 8px;">
+                Secure payment via Razorpay • UPI, Cards, Net Banking
+            </p>
+            <script>
+            var options = {{
+                "key": "{key_id}",
+                "amount": "1200",
+                "currency": "INR",
+                "name": "UPSC Predictor",
+                "description": "1 Query Credit",
+                "prefill": {{
+                    "email": "{user_email}"
+                }},
+                "theme": {{
+                    "color": "#3b82f6"
+                }},
+                "handler": function (response) {{
+                    // Payment successful - reload page with payment ID
+                    window.location.href = window.location.origin + window.location.pathname + 
+                        "?razorpay_payment_id=" + response.razorpay_payment_id;
+                }}
+            }};
+            var rzp = new Razorpay(options);
+            document.getElementById('rzp-button').onclick = function(e) {{
+                rzp.open();
+                e.preventDefault();
+            }};
+            </script>
+            """
+            
+            components.html(checkout_html, height=120)
+            
+        except Exception as e:
+            st.error(f"Payment error: {str(e)}")
+    else:
+        # Not logged in - show message
+        st.info("Please login first to buy credits.")
 
 
 # =============================================================================
@@ -704,6 +766,9 @@ if 'just_paid' not in st.session_state:
 
 if 'is_new_user' not in st.session_state:
     st.session_state.is_new_user = False
+
+if 'show_payment' not in st.session_state:
+    st.session_state.show_payment = False
 
 
 # =============================================================================
@@ -738,26 +803,10 @@ with st.sidebar:
         
         st.markdown("---")
         
-        try:
-            razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
-            st.link_button("💳 Buy Credits", razorpay_url, use_container_width=True)
-        except:
-            pass
-        
-        # Refresh credits button - checks for pending payments
-        if st.button("🔄 Refresh Credits", use_container_width=True):
-            pending = check_and_credit_pending_payments(st.session_state.email)
-            if pending > 0:
-                user = get_user_by_email(st.session_state.email)
-                if user:
-                    st.session_state.free_credits = user.get('free_credits', 0)
-                    st.session_state.paid_credits = user.get('paid_credits', 0)
-                st.success(f"✅ Added {pending} credit(s)!")
-                st.rerun()
-            else:
-                st.info("No new payments found")
-        
-        st.caption("Click after payment to add credits")
+        # Show buy credits in sidebar using checkbox to expand
+        if st.button("💳 Buy Credits", use_container_width=True):
+            st.session_state.show_payment = True
+            st.rerun()
         
         if st.button("Logout", use_container_width=True):
             st.session_state.logged_in = False
@@ -842,7 +891,19 @@ else:
     
     total_credits = st.session_state.free_credits + st.session_state.paid_credits
     
-    if total_credits > 0:
+    # Show payment section if requested or no credits
+    if st.session_state.show_payment or total_credits == 0:
+        if total_credits == 0:
+            st.markdown("### You're out of credits!")
+        else:
+            st.markdown("### Buy More Credits")
+        show_payment_section()
+        if st.session_state.show_payment and total_credits > 0:
+            if st.button("← Back to Generator"):
+                st.session_state.show_payment = False
+                st.rerun()
+    
+    elif total_credits > 0:
         st.markdown("### Enter Any Current Affairs Topic")
         
         topic_text = st.text_area(
@@ -895,9 +956,6 @@ else:
                         show_payment_section()
                     
                     st.balloons()
-    else:
-        st.markdown("### You're out of credits!")
-        show_payment_section()
 
 
 # =============================================================================
