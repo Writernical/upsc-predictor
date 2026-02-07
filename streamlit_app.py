@@ -17,7 +17,7 @@ STREAMLIT SECRETS:
 
 import streamlit as st
 import anthropic
-import razorpay
+import requests
 import os
 from datetime import datetime
 from supabase import create_client
@@ -45,17 +45,7 @@ def get_supabase_client():
     except Exception:
         return None
 
-@st.cache_resource
-def get_razorpay_client():
-    try:
-        key_id = st.secrets["RAZORPAY_KEY_ID"]
-        key_secret = st.secrets["RAZORPAY_KEY_SECRET"]
-        return razorpay.Client(auth=(key_id, key_secret))
-    except Exception:
-        return None
-
 supabase = get_supabase_client()
-razorpay_client = get_razorpay_client()
 
 # =============================================================================
 # CSS
@@ -183,18 +173,26 @@ def record_payment(payment_id: str, phone: str, amount: int = 12):
 # =============================================================================
 
 def fetch_phone_from_payment(payment_id: str) -> str:
-    """Fetch phone number from Razorpay payment."""
-    if not razorpay_client:
-        return None
+    """Fetch phone number from Razorpay payment using API."""
     try:
-        payment = razorpay_client.payment.fetch(payment_id)
-        contact = payment.get('contact', '')
-        # Razorpay returns phone with +91, normalize it
-        if contact.startswith('+91'):
-            contact = contact[3:]
-        elif contact.startswith('91') and len(contact) == 12:
-            contact = contact[2:]
-        return contact
+        key_id = st.secrets["RAZORPAY_KEY_ID"]
+        key_secret = st.secrets["RAZORPAY_KEY_SECRET"]
+        
+        response = requests.get(
+            f"https://api.razorpay.com/v1/payments/{payment_id}",
+            auth=(key_id, key_secret)
+        )
+        
+        if response.status_code == 200:
+            payment = response.json()
+            contact = payment.get('contact', '')
+            # Razorpay returns phone with +91, normalize it
+            if contact.startswith('+91'):
+                contact = contact[3:]
+            elif contact.startswith('91') and len(contact) == 12:
+                contact = contact[2:]
+            return contact
+        return None
     except Exception:
         return None
 
