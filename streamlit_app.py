@@ -42,10 +42,15 @@ def get_supabase_client():
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
         return create_client(url, key)
-    except Exception:
+    except Exception as e:
+        st.error(f"Supabase init error: {str(e)}")
         return None
 
 supabase = get_supabase_client()
+
+# Debug: Check if supabase is connected
+if not supabase:
+    st.sidebar.error("⚠️ DB not connected")
 
 # =============================================================================
 # CSS
@@ -101,6 +106,7 @@ def get_user_by_phone(phone: str):
 def create_user(phone: str):
     """Create new user with 1 free credit."""
     if not supabase:
+        st.error("Database not connected")
         return None
     try:
         result = supabase.table('users').insert({
@@ -110,7 +116,8 @@ def create_user(phone: str):
             'total_queries': 0
         }).execute()
         return result.data[0] if result.data else None
-    except Exception:
+    except Exception as e:
+        st.error(f"DB Error: {str(e)}")
         return None
 
 
