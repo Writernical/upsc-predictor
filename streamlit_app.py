@@ -109,7 +109,7 @@ def send_otp_email(email: str, otp: str) -> bool:
                 "Content-Type": "application/json"
             },
             json={
-                "from": "UPSC Predictor <onboarding@resend.dev>",
+                "from": "UPSC Predictor <noreply@upscpredictor.in>",
                 "to": email,
                 "subject": "Your OTP for UPSC Predictor",
                 "html": f"""
