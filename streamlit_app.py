@@ -97,7 +97,10 @@ def generate_otp():
 def send_otp_email(email: str, otp: str) -> bool:
     """Send OTP via Resend."""
     try:
-        api_key = st.secrets["RESEND_API_KEY"]
+        api_key = st.secrets.get("RESEND_API_KEY")
+        if not api_key:
+            st.error("RESEND_API_KEY not configured in secrets")
+            return False
         
         response = requests.post(
             "https://api.resend.com/emails",
@@ -122,8 +125,13 @@ def send_otp_email(email: str, otp: str) -> bool:
                 """
             }
         )
-        return response.status_code == 200
-    except Exception:
+        
+        if response.status_code != 200:
+            st.error(f"Resend error: {response.status_code} - {response.text}")
+            return False
+        return True
+    except Exception as e:
+        st.error(f"Email error: {str(e)}")
         return False
 
 
