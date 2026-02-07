@@ -135,9 +135,10 @@ def update_user_credits(phone: str, free_credits: int, paid_credits: int, total_
         if total_queries is not None:
             update_data['total_queries'] = total_queries
             update_data['last_query_at'] = datetime.utcnow().isoformat()
-        supabase.table('users').update(update_data).eq('phone', phone).execute()
+        result = supabase.table('users').update(update_data).eq('phone', phone).execute()
         return True
-    except Exception:
+    except Exception as e:
+        st.error(f"Update error: {str(e)}")
         return False
 
 
@@ -149,12 +150,18 @@ def add_paid_credits(phone: str, credits_to_add: int = 1):
         return 0
     
     user = get_user_by_phone(phone)
+    st.info(f"Debug add_paid: Found user = {user}")
+    
     if user:
         new_paid = user.get('paid_credits', 0) + credits_to_add
-        update_user_credits(phone, user.get('free_credits', 0), new_paid)
+        new_free = user.get('free_credits', 0)
+        st.info(f"Debug add_paid: Updating to free={new_free}, paid={new_paid}")
+        success = update_user_credits(phone, new_free, new_paid)
+        st.info(f"Debug add_paid: Update success = {success}")
         return new_paid
     else:
         # User doesn't exist yet - create with paid credit
+        st.info(f"Debug add_paid: Creating new user with phone {phone}")
         if not supabase:
             return 0
         try:
@@ -256,15 +263,23 @@ def process_razorpay_return():
     
     # Fetch phone from Razorpay
     phone = fetch_phone_from_payment(payment_id)
+    st.info(f"Debug: Phone from Razorpay = {phone}")
+    
     if not phone:
         st.error("Could not fetch payment details. Contact support.")
         st.query_params.clear()
         return False
     
-    # Record payment and add paid credit
+    # Record payment
     if record_payment(payment_id, phone):
-        add_paid_credits(phone, 1)
+        # Add paid credit
+        new_paid = add_paid_credits(phone, 1)
+        st.info(f"Debug: Added credits. New paid = {new_paid}")
+        
+        # Fetch updated user
         user = get_user_by_phone(phone)
+        st.info(f"Debug: User from DB = {user}")
+        
         if user:
             st.session_state.phone = phone
             st.session_state.free_credits = user.get('free_credits', 0)
