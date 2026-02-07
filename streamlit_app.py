@@ -187,10 +187,8 @@ def get_user_by_email(email: str):
     try:
         email = email.lower().strip()
         result = supabase.table('users').select('*').eq('email', email).execute()
-        user = result.data[0] if result.data else None
-        return user
-    except Exception as e:
-        st.error(f"Debug get_user error: {str(e)}")
+        return result.data[0] if result.data else None
+    except Exception:
         return None
 
 
@@ -222,11 +220,9 @@ def update_user_credits(email: str, free_credits: int, paid_credits: int, total_
         if total_queries is not None:
             update_data['total_queries'] = total_queries
             update_data['last_query_at'] = datetime.utcnow().isoformat()
-        result = supabase.table('users').update(update_data).eq('email', email).execute()
-        st.info(f"Debug update: email={email}, data={update_data}, result={result.data}")
+        supabase.table('users').update(update_data).eq('email', email).execute()
         return True
-    except Exception as e:
-        st.error(f"Debug update error: {str(e)}")
+    except Exception:
         return False
 
 
@@ -235,32 +231,25 @@ def add_paid_credits(email: str, credits_to_add: int = 1):
     email = email.lower().strip()
     user = get_user_by_email(email)
     
-    st.info(f"Debug add_paid: email={email}, existing user={user}")
-    
     if user:
         new_paid = user.get('paid_credits', 0) + credits_to_add
         new_free = user.get('free_credits', 0)
-        st.info(f"Debug add_paid: Updating to free={new_free}, paid={new_paid}")
-        success = update_user_credits(email, new_free, new_paid)
-        st.info(f"Debug add_paid: Update success={success}")
+        update_user_credits(email, new_free, new_paid)
         return new_paid
     else:
         # Create user with paid credit (no free credit since they paid first)
-        st.info(f"Debug add_paid: Creating new user with email {email}")
         if not supabase:
             return 0
         try:
-            result = supabase.table('users').insert({
+            supabase.table('users').insert({
                 'email': email,
                 'free_credits': 0,
                 'paid_credits': credits_to_add,
                 'total_queries': 0,
                 'email_verified': True
             }).execute()
-            st.info(f"Debug add_paid: Insert result={result.data}")
             return credits_to_add
-        except Exception as e:
-            st.error(f"Debug add_paid: Insert error={str(e)}")
+        except Exception:
             return 0
 
 
@@ -296,6 +285,50 @@ def record_payment(payment_id: str, email: str, amount: int = 12):
         return False
 
 
+def check_and_credit_pending_payments(email: str) -> int:
+    """Check Razorpay for recent payments by email and credit if not processed."""
+    try:
+        key_id = st.secrets["RAZORPAY_KEY_ID"]
+        key_secret = st.secrets["RAZORPAY_KEY_SECRET"]
+        
+        # Fetch recent payments from Razorpay (last 24 hours)
+        import time
+        from_timestamp = int(time.time()) - 86400  # 24 hours ago
+        
+        response = requests.get(
+            f"https://api.razorpay.com/v1/payments",
+            auth=(key_id, key_secret),
+            params={
+                'from': from_timestamp,
+                'count': 50
+            }
+        )
+        
+        if response.status_code != 200:
+            return 0
+        
+        payments = response.json().get('items', [])
+        credits_added = 0
+        
+        for payment in payments:
+            # Check if this payment matches user's email and is captured
+            payment_email = payment.get('email', '').lower().strip()
+            payment_id = payment.get('id', '')
+            status = payment.get('status', '')
+            
+            if payment_email == email.lower().strip() and status == 'captured':
+                # Check if already processed
+                if not is_payment_processed(payment_id):
+                    # Record and credit
+                    if record_payment(payment_id, email):
+                        add_paid_credits(email, 1)
+                        credits_added += 1
+        
+        return credits_added
+    except Exception as e:
+        return 0
+
+
 def fetch_email_from_payment(payment_id: str) -> str:
     """Fetch email from Razorpay payment."""
     try:
@@ -309,48 +342,34 @@ def fetch_email_from_payment(payment_id: str) -> str:
         
         if response.status_code == 200:
             payment = response.json()
-            email = payment.get('email', '')
-            st.info(f"Debug: Razorpay returned email = {email}")
-            return email.lower().strip() if email else None
-        else:
-            st.error(f"Razorpay API error: {response.status_code} - {response.text}")
+            email = payment.get('email', '').lower().strip()
+            return email if email else None
         return None
-    except Exception as e:
-        st.error(f"Fetch email error: {str(e)}")
+    except Exception:
         return None
 
 
 def process_razorpay_return():
-    """Process Razorpay redirect after payment."""
+    """Process Razorpay redirect after payment (for Checkout integration)."""
     params = st.query_params
     
     if 'razorpay_payment_id' not in params:
         return False
     
     payment_id = params.get('razorpay_payment_id', '')
-    st.info(f"Debug: Processing payment {payment_id}")
     
     if is_payment_processed(payment_id):
-        st.info("Debug: Payment already processed")
         st.query_params.clear()
         return False
     
-    # Fetch email from Razorpay
     email = fetch_email_from_payment(payment_id)
-    
     if not email:
-        st.error("Could not fetch payment details. Contact support.")
         st.query_params.clear()
         return False
-    
-    st.info(f"Debug: Adding credit to {email}")
     
     if record_payment(payment_id, email):
-        new_paid = add_paid_credits(email, 1)
-        st.info(f"Debug: New paid credits = {new_paid}")
-        
+        add_paid_credits(email, 1)
         user = get_user_by_email(email)
-        st.info(f"Debug: User from DB = {user}")
         
         if user:
             st.session_state.email = email
@@ -601,6 +620,10 @@ def show_email_entry():
                     elif verify_otp(st.session_state.otp_email, otp_input):
                         # OTP verified - login or create user
                         email = st.session_state.otp_email
+                        
+                        # Check for pending Razorpay payments BEFORE loading user
+                        pending_credits = check_and_credit_pending_payments(email)
+                        
                         user = get_user_by_email(email)
                         
                         if user:
@@ -610,12 +633,14 @@ def show_email_entry():
                             st.session_state.paid_credits = user.get('paid_credits', 0)
                             st.session_state.total_queries = user.get('total_queries', 0)
                             st.session_state.logged_in = True
+                            if pending_credits > 0:
+                                st.session_state.just_paid = True
                         else:
                             # New user
                             create_user(email)
                             st.session_state.email = email
                             st.session_state.free_credits = 1
-                            st.session_state.paid_credits = 0
+                            st.session_state.paid_credits = pending_credits
                             st.session_state.total_queries = 0
                             st.session_state.logged_in = True
                             st.session_state.is_new_user = True
@@ -646,7 +671,7 @@ def show_payment_section():
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.warning("⚠️ **Important:** Use the SAME EMAIL in Razorpay checkout that you used to login here.")
+        st.info("💡 **After payment:** Login again with the **same email** you used in Razorpay. Credits will be added automatically.")
         try:
             razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
             st.link_button("💳 Pay ₹12 — Get 1 Query", razorpay_url, use_container_width=True, type="primary")
@@ -718,6 +743,21 @@ with st.sidebar:
             st.link_button("💳 Buy Credits", razorpay_url, use_container_width=True)
         except:
             pass
+        
+        # Refresh credits button - checks for pending payments
+        if st.button("🔄 Refresh Credits", use_container_width=True):
+            pending = check_and_credit_pending_payments(st.session_state.email)
+            if pending > 0:
+                user = get_user_by_email(st.session_state.email)
+                if user:
+                    st.session_state.free_credits = user.get('free_credits', 0)
+                    st.session_state.paid_credits = user.get('paid_credits', 0)
+                st.success(f"✅ Added {pending} credit(s)!")
+                st.rerun()
+            else:
+                st.info("No new payments found")
+        
+        st.caption("Click after payment to add credits")
         
         if st.button("Logout", use_container_width=True):
             st.session_state.logged_in = False
