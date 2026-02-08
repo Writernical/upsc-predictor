@@ -16,7 +16,6 @@ STREAMLIT SECRETS:
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
 import anthropic
 import requests
 import random
@@ -908,76 +907,167 @@ else:
     
     total_credits = st.session_state.free_credits + st.session_state.paid_credits
     
-    # Show payment section if requested
-    if st.session_state.show_payment:
-        st.markdown("### Buy Credits")
-        st.markdown("""
-        <div class="pay-box">
-            <h3>☕ ₹12 — Less than your chai</h3>
-            <p>Pay once. Get 10 practice questions instantly.<br/>
-            5 MCQs with traps + 5 Mains with answer frameworks.</p>
-        </div>
-        """, unsafe_allow_html=True)
+    # Show payment section if requested or no credits
+    if st.session_state.show_payment or total_credits == 0:
         
-        # Full-width Razorpay checkout
         try:
+            import streamlit.components.v1 as components
             key_id = st.secrets["RAZORPAY_KEY_ID"]
             user_email = st.session_state.email
             
+            # Get the current app URL for callback
+            # Streamlit Cloud URL
+            callback_url = "https://upsc-predictor.streamlit.app/"
+            
+            # Razorpay checkout with REDIRECT mode (full page)
             checkout_html = f"""
-            <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-            <div style="text-align: center; padding: 20px 0;">
-                <button id="rzp-btn" style="
-                    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-                    color: white;
-                    padding: 18px 48px;
-                    font-size: 20px;
-                    font-weight: 700;
-                    border-radius: 12px;
-                    border: none;
-                    cursor: pointer;
-                    box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
-                    min-width: 280px;
-                ">💳 Pay ₹12 — Get 1 Query</button>
-                <p style="color: #64748b; font-size: 14px; margin-top: 15px;">
-                    Secure payment via Razorpay • UPI, Cards, Net Banking
-                </p>
-            </div>
-            <script>
-            var options = {{
-                "key": "{key_id}",
-                "amount": "1200",
-                "currency": "INR",
-                "name": "UPSC Predictor",
-                "description": "1 Query Credit",
-                "prefill": {{ "email": "{user_email}" }},
-                "theme": {{ "color": "#3b82f6" }},
-                "handler": function(response) {{
-                    window.parent.location.href = window.parent.location.origin + 
-                        window.parent.location.pathname + 
-                        "?razorpay_payment_id=" + response.razorpay_payment_id;
-                }},
-                "modal": {{
-                    "ondismiss": function() {{}}
-                }}
-            }};
-            var rzp = new Razorpay(options);
-            document.getElementById('rzp-btn').onclick = function(e) {{
-                rzp.open();
-                e.preventDefault();
-            }};
-            </script>
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{ 
+                        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                        background: #ffffff;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        max-width: 400px;
+                        margin: 0 auto;
+                        text-align: center;
+                    }}
+                    .pay-box {{
+                        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+                        border: 2px solid #f59e0b;
+                        border-radius: 16px;
+                        padding: 24px;
+                        margin-bottom: 20px;
+                    }}
+                    .pay-box h3 {{
+                        color: #92400e;
+                        font-size: 24px;
+                        margin-bottom: 12px;
+                    }}
+                    .pay-box p {{
+                        color: #78350f;
+                        font-size: 16px;
+                        line-height: 1.5;
+                    }}
+                    .email-hint {{
+                        background: #dbeafe;
+                        border-radius: 8px;
+                        padding: 12px;
+                        margin-bottom: 20px;
+                    }}
+                    .email-hint p {{
+                        color: #1e40af;
+                        font-size: 14px;
+                        margin: 0;
+                    }}
+                    #rzp-btn {{
+                        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+                        color: white;
+                        padding: 20px 40px;
+                        font-size: 20px;
+                        font-weight: 700;
+                        border-radius: 12px;
+                        border: none;
+                        cursor: pointer;
+                        box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
+                        width: 100%;
+                    }}
+                    #rzp-btn:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 25px rgba(59, 130, 246, 0.6);
+                    }}
+                    .secure-text {{
+                        color: #64748b;
+                        font-size: 13px;
+                        margin-top: 16px;
+                    }}
+                    .note {{
+                        background: #f0fdf4;
+                        border: 1px solid #22c55e;
+                        border-radius: 8px;
+                        padding: 12px;
+                        margin-top: 20px;
+                        color: #166534;
+                        font-size: 14px;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="pay-box">
+                        <h3>☕ ₹12 — Less than chai</h3>
+                        <p>Pay once. Get 10 practice questions.<br/>5 MCQs + 5 Mains with frameworks.</p>
+                    </div>
+                    
+                    <div class="email-hint">
+                        <p>📧 Paying as: <strong>{user_email}</strong></p>
+                    </div>
+                    
+                    <button id="rzp-btn">💳 Pay ₹12 Now</button>
+                    <p class="secure-text">🔒 Secure payment via Razorpay</p>
+                    
+                    <div class="note">
+                        ✅ After payment, you'll return here automatically with credit added!
+                    </div>
+                </div>
+                
+                <script>
+                var options = {{
+                    "key": "{key_id}",
+                    "amount": "1200",
+                    "currency": "INR",
+                    "name": "UPSC Predictor",
+                    "description": "1 Query Credit",
+                    "prefill": {{ 
+                        "email": "{user_email}"
+                    }},
+                    "theme": {{ "color": "#3b82f6" }},
+                    "callback_url": "{callback_url}",
+                    "redirect": true
+                }};
+                var rzp = new Razorpay(options);
+                document.getElementById('rzp-btn').onclick = function(e) {{
+                    rzp.open();
+                    e.preventDefault();
+                }};
+                </script>
+            </body>
+            </html>
             """
             
-            components.html(checkout_html, height=150)
+            components.html(checkout_html, height=420, scrolling=False)
             
         except Exception as e:
             st.error(f"Payment error: {str(e)}")
         
         st.markdown("---")
-        if st.button("← Back to Generator", use_container_width=False):
-            st.session_state.show_payment = False
-            st.rerun()
+        
+        # Backup refresh button
+        st.markdown("*Paid but not credited? Click below:*")
+        if st.button("🔄 Refresh Credits", use_container_width=True):
+            with st.spinner("Checking..."):
+                pending = check_and_credit_pending_payments(st.session_state.email)
+            if pending > 0:
+                user = get_user_by_email(st.session_state.email)
+                if user:
+                    st.session_state.free_credits = user.get('free_credits', 0)
+                    st.session_state.paid_credits = user.get('paid_credits', 0)
+                st.success(f"✅ Added {pending} credit(s)!")
+                st.session_state.show_payment = False
+                st.rerun()
+            else:
+                st.info("No pending payments found.")
+        
+        if total_credits > 0:
+            if st.button("← Back to Generator"):
+                st.session_state.show_payment = False
+                st.rerun()
     
     elif total_credits > 0:
         st.markdown("### Enter Any Current Affairs Topic")
@@ -1031,69 +1121,6 @@ else:
                         st.info("🎯 **Liked it?** Click 'Buy Credits' in the sidebar to get more.")
                     
                     st.balloons()
-    
-    else:
-        # No credits left
-        st.markdown("### You're out of credits!")
-        st.markdown("""
-        <div class="pay-box">
-            <h3>Get more queries</h3>
-            <p>Click <strong>Buy Credits</strong> in the sidebar to continue.</p>
-            <p style="margin-top: 1rem;">₹12 per query • 10 questions each</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Also show payment here for convenience
-        try:
-            key_id = st.secrets["RAZORPAY_KEY_ID"]
-            user_email = st.session_state.email
-            
-            checkout_html = f"""
-            <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-            <div style="text-align: center; padding: 20px 0;">
-                <button id="rzp-btn2" style="
-                    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-                    color: white;
-                    padding: 18px 48px;
-                    font-size: 20px;
-                    font-weight: 700;
-                    border-radius: 12px;
-                    border: none;
-                    cursor: pointer;
-                    box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
-                    min-width: 280px;
-                ">💳 Pay ₹12 — Get 1 Query</button>
-                <p style="color: #64748b; font-size: 14px; margin-top: 15px;">
-                    Secure payment via Razorpay • UPI, Cards, Net Banking
-                </p>
-            </div>
-            <script>
-            var options2 = {{
-                "key": "{key_id}",
-                "amount": "1200",
-                "currency": "INR",
-                "name": "UPSC Predictor",
-                "description": "1 Query Credit",
-                "prefill": {{ "email": "{user_email}" }},
-                "theme": {{ "color": "#3b82f6" }},
-                "handler": function(response) {{
-                    window.parent.location.href = window.parent.location.origin + 
-                        window.parent.location.pathname + 
-                        "?razorpay_payment_id=" + response.razorpay_payment_id;
-                }}
-            }};
-            var rzp2 = new Razorpay(options2);
-            document.getElementById('rzp-btn2').onclick = function(e) {{
-                rzp2.open();
-                e.preventDefault();
-            }};
-            </script>
-            """
-            
-            components.html(checkout_html, height=150)
-            
-        except Exception as e:
-            pass
 
 
 # =============================================================================
