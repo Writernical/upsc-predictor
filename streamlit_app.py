@@ -758,9 +758,6 @@ if 'just_paid' not in st.session_state:
 if 'is_new_user' not in st.session_state:
     st.session_state.is_new_user = False
 
-if 'show_payment' not in st.session_state:
-    st.session_state.show_payment = False
-
 
 # =============================================================================
 # PROCESS RAZORPAY RETURN
@@ -790,14 +787,44 @@ with st.sidebar:
         st.markdown(f"📊 Used: **{st.session_state.total_queries}**")
         
         st.markdown("---")
-        st.markdown("**₹12 per query**")
+        
+        # Direct payment link (opens in new tab)
+        try:
+            razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
+            st.markdown(f"""
+            <a href="{razorpay_url}" target="_blank" style="
+                display: block;
+                width: 100%;
+                text-align: center;
+                background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+                color: white;
+                padding: 10px 16px;
+                font-size: 14px;
+                font-weight: 600;
+                border-radius: 8px;
+                text-decoration: none;
+                margin-bottom: 8px;
+            ">💳 Buy Credits (₹12)</a>
+            """, unsafe_allow_html=True)
+            st.caption(f"Use email: {st.session_state.email}")
+        except:
+            pass
+        
+        # Refresh credits button
+        if st.button("🔄 Refresh Credits", use_container_width=True):
+            with st.spinner("Checking..."):
+                pending = check_and_credit_pending_payments(st.session_state.email)
+            if pending > 0:
+                user = get_user_by_email(st.session_state.email)
+                if user:
+                    st.session_state.free_credits = user.get('free_credits', 0)
+                    st.session_state.paid_credits = user.get('paid_credits', 0)
+                st.success(f"✅ +{pending} credit(s)!")
+                st.rerun()
+            else:
+                st.info("No new payments")
         
         st.markdown("---")
-        
-        # Show buy credits in sidebar using checkbox to expand
-        if st.button("💳 Buy Credits", use_container_width=True):
-            st.session_state.show_payment = True
-            st.rerun()
         
         if st.button("Logout", use_container_width=True):
             st.session_state.logged_in = False
@@ -882,19 +909,7 @@ else:
     
     total_credits = st.session_state.free_credits + st.session_state.paid_credits
     
-    # Show payment section if requested or no credits
-    if st.session_state.show_payment or total_credits == 0:
-        if total_credits == 0:
-            st.markdown("### You're out of credits!")
-        else:
-            st.markdown("### Buy More Credits")
-        show_payment_section()
-        if st.session_state.show_payment and total_credits > 0:
-            if st.button("← Back to Generator"):
-                st.session_state.show_payment = False
-                st.rerun()
-    
-    elif total_credits > 0:
+    if total_credits > 0:
         st.markdown("### Enter Any Current Affairs Topic")
         
         topic_text = st.text_area(
@@ -943,10 +958,20 @@ else:
                     new_total = st.session_state.free_credits + st.session_state.paid_credits
                     if new_total == 0:
                         st.markdown("---")
-                        st.info("🎯 **Liked it?** Get more queries for ₹12 each.")
-                        show_payment_section()
+                        st.info("🎯 **Liked it?** Buy more credits from the sidebar menu (₹12 each).")
                     
                     st.balloons()
+    
+    else:
+        # No credits left
+        st.markdown("### You're out of credits!")
+        st.markdown("""
+        <div class="pay-box">
+            <h3>Get more queries</h3>
+            <p>Open the <strong>sidebar menu</strong> (☰ top left on mobile) and click <strong>Buy Credits</strong>.</p>
+            <p style="margin-top: 1rem;">₹12 per query • 10 questions each</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 # =============================================================================
