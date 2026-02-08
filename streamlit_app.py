@@ -727,7 +727,7 @@ def show_payment_section():
             
             # Refresh credits button
             if st.session_state.logged_in:
-                if st.button("🔄 Refresh Credits", use_container_width=True, type="primary"):
+                if st.button("🔄 Refresh Credits", use_container_width=True, type="primary", key="refresh_old"):
                     with st.spinner("Checking for payments..."):
                         pending = check_and_credit_pending_payments(st.session_state.email)
                     if pending > 0:
@@ -803,12 +803,12 @@ with st.sidebar:
         st.markdown("---")
         
         # Button to show payment in main area
-        if st.button("💳 Buy Credits (₹12)", use_container_width=True, type="primary"):
+        if st.button("💳 Buy Credits (₹12)", use_container_width=True, type="primary", key="buy_sidebar"):
             st.session_state.show_payment = True
             st.rerun()
         
         # Refresh credits button
-        if st.button("🔄 Refresh Credits", use_container_width=True):
+        if st.button("🔄 Refresh Credits", use_container_width=True, key="refresh_sidebar"):
             with st.spinner("Checking..."):
                 pending = check_and_credit_pending_payments(st.session_state.email)
             if pending > 0:
@@ -931,7 +931,8 @@ else:
                     body {{ 
                         font-family: -apple-system, BlinkMacSystemFont, sans-serif;
                         background: #ffffff;
-                        padding: 20px;
+                        padding: 24px 16px;
+                        min-height: 100%;
                     }}
                     .container {{
                         max-width: 400px;
@@ -941,38 +942,38 @@ else:
                     .pay-box {{
                         background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
                         border: 2px solid #f59e0b;
-                        border-radius: 16px;
-                        padding: 24px;
-                        margin-bottom: 20px;
+                        border-radius: 20px;
+                        padding: 28px 24px;
+                        margin-bottom: 24px;
                     }}
                     .pay-box h3 {{
                         color: #92400e;
-                        font-size: 24px;
-                        margin-bottom: 12px;
+                        font-size: 28px;
+                        margin-bottom: 16px;
                     }}
                     .pay-box p {{
                         color: #78350f;
-                        font-size: 16px;
-                        line-height: 1.5;
+                        font-size: 18px;
+                        line-height: 1.6;
                     }}
                     .email-hint {{
                         background: #dbeafe;
-                        border-radius: 8px;
-                        padding: 12px;
-                        margin-bottom: 20px;
+                        border-radius: 12px;
+                        padding: 16px;
+                        margin-bottom: 28px;
                     }}
                     .email-hint p {{
                         color: #1e40af;
-                        font-size: 14px;
+                        font-size: 16px;
                         margin: 0;
                     }}
                     #rzp-btn {{
                         background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
                         color: white;
-                        padding: 20px 40px;
-                        font-size: 20px;
+                        padding: 24px 40px;
+                        font-size: 22px;
                         font-weight: 700;
-                        border-radius: 12px;
+                        border-radius: 16px;
                         border: none;
                         cursor: pointer;
                         box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
@@ -984,17 +985,18 @@ else:
                     }}
                     .secure-text {{
                         color: #64748b;
-                        font-size: 13px;
-                        margin-top: 16px;
+                        font-size: 14px;
+                        margin-top: 20px;
                     }}
                     .note {{
                         background: #f0fdf4;
                         border: 1px solid #22c55e;
-                        border-radius: 8px;
-                        padding: 12px;
-                        margin-top: 20px;
+                        border-radius: 12px;
+                        padding: 16px;
+                        margin-top: 28px;
                         color: #166534;
-                        font-size: 14px;
+                        font-size: 15px;
+                        line-height: 1.5;
                     }}
                 </style>
             </head>
@@ -1041,7 +1043,7 @@ else:
             </html>
             """
             
-            components.html(checkout_html, height=420, scrolling=False)
+            components.html(checkout_html, height=650, scrolling=False)
             
         except Exception as e:
             st.error(f"Payment error: {str(e)}")
@@ -1050,7 +1052,7 @@ else:
         
         # Backup refresh button
         st.markdown("*Paid but not credited? Click below:*")
-        if st.button("🔄 Refresh Credits", use_container_width=True):
+        if st.button("🔄 Refresh Credits", use_container_width=True, key="refresh_payment"):
             with st.spinner("Checking..."):
                 pending = check_and_credit_pending_payments(st.session_state.email)
             if pending > 0:
@@ -1065,7 +1067,7 @@ else:
                 st.info("No pending payments found.")
         
         if total_credits > 0:
-            if st.button("← Back to Generator"):
+            if st.button("← Back to Generator", key="back_payment"):
                 st.session_state.show_payment = False
                 st.rerun()
     
