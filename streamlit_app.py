@@ -16,7 +16,6 @@ STREAMLIT SECRETS:
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
 import anthropic
 import requests
 import random
@@ -725,7 +724,6 @@ def show_payment_section():
                             st.session_state.free_credits = user.get('free_credits', 0)
                             st.session_state.paid_credits = user.get('paid_credits', 0)
                         st.success(f"✅ Added {pending} credit(s)!")
-                        st.session_state.show_payment = False
                         st.rerun()
                     else:
                         st.warning("No new payments found. Make sure you used the same email.")
@@ -789,56 +787,29 @@ with st.sidebar:
         
         st.markdown("---")
         
-        # Razorpay Standard Checkout - opens popup, returns with payment_id
+        # Direct payment link (opens in new tab)
         try:
-            key_id = st.secrets["RAZORPAY_KEY_ID"]
-            user_email = st.session_state.email
-            
-            checkout_html = f"""
-            <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-            <button id="rzp-btn" style="
+            razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
+            st.markdown(f"""
+            <a href="{razorpay_url}" target="_blank" style="
+                display: block;
                 width: 100%;
+                text-align: center;
                 background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
                 color: white;
                 padding: 10px 16px;
                 font-size: 14px;
                 font-weight: 600;
                 border-radius: 8px;
-                border: none;
-                cursor: pointer;
-            ">💳 Buy Credits (₹12)</button>
-            <script>
-            var options = {{
-                "key": "{key_id}",
-                "amount": "1200",
-                "currency": "INR",
-                "name": "UPSC Predictor",
-                "description": "1 Query Credit",
-                "prefill": {{ "email": "{user_email}" }},
-                "theme": {{ "color": "#3b82f6" }},
-                "handler": function(response) {{
-                    window.parent.location.href = window.parent.location.origin + 
-                        window.parent.location.pathname + 
-                        "?razorpay_payment_id=" + response.razorpay_payment_id;
-                }},
-                "modal": {{
-                    "ondismiss": function() {{}}
-                }}
-            }};
-            var rzp = new Razorpay(options);
-            document.getElementById('rzp-btn').onclick = function(e) {{
-                rzp.open();
-                e.preventDefault();
-            }};
-            </script>
-            """
-            
-            components.html(checkout_html, height=50)
-            
-        except Exception as e:
-            st.error(f"Payment error: {str(e)}")
+                text-decoration: none;
+                margin-bottom: 8px;
+            ">💳 Buy Credits (₹12)</a>
+            """, unsafe_allow_html=True)
+            st.caption(f"Use email: {st.session_state.email}")
+        except:
+            pass
         
-        # Refresh credits button (backup)
+        # Refresh credits button
         if st.button("🔄 Refresh Credits", use_container_width=True):
             with st.spinner("Checking..."):
                 pending = check_and_credit_pending_payments(st.session_state.email)
