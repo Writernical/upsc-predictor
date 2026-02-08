@@ -672,6 +672,16 @@ def show_email_entry():
                     st.session_state.otp_sent = False
                     st.session_state.otp_email = None
                     st.rerun()
+            
+            # Resend OTP option
+            st.markdown("---")
+            st.markdown("<p style='text-align: center; color: #64748b; font-size: 0.85rem;'>Didn't receive OTP?</p>", unsafe_allow_html=True)
+            if st.button("🔄 Resend OTP", use_container_width=True):
+                otp = generate_otp()
+                if save_otp(st.session_state.otp_email, otp) and send_otp_email(st.session_state.otp_email, otp):
+                    st.success("✅ New OTP sent! Check your email.")
+                else:
+                    st.error("Could not resend OTP. Please try again.")
 
 
 def show_payment_section():
