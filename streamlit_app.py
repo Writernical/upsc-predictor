@@ -916,23 +916,20 @@ else:
             user_email = st.session_state.email
             
             # Get the current app URL for callback
-            # Streamlit Cloud URL
             callback_url = "https://upsc-predictor.streamlit.app/"
             
-            # Razorpay checkout with REDIRECT mode (full page)
+            # Payment UI with button that triggers Razorpay in PARENT window
             checkout_html = f"""
             <!DOCTYPE html>
             <html>
             <head>
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
                 <style>
                     * {{ margin: 0; padding: 0; box-sizing: border-box; }}
                     body {{ 
                         font-family: -apple-system, BlinkMacSystemFont, sans-serif;
                         background: #ffffff;
                         padding: 24px 16px;
-                        min-height: 100%;
                     }}
                     .container {{
                         max-width: 400px;
@@ -979,10 +976,6 @@ else:
                         box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
                         width: 100%;
                     }}
-                    #rzp-btn:hover {{
-                        transform: translateY(-2px);
-                        box-shadow: 0 8px 25px rgba(59, 130, 246, 0.6);
-                    }}
                     .secure-text {{
                         color: #64748b;
                         font-size: 14px;
@@ -1011,7 +1004,7 @@ else:
                         <p>📧 Paying as: <strong>{user_email}</strong></p>
                     </div>
                     
-                    <button id="rzp-btn">💳 Pay ₹12 Now</button>
+                    <button id="rzp-btn" onclick="openRazorpay()">💳 Pay ₹12 Now</button>
                     <p class="secure-text">🔒 Secure payment via Razorpay</p>
                     
                     <div class="note">
@@ -1019,25 +1012,42 @@ else:
                     </div>
                 </div>
                 
+                <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
                 <script>
-                var options = {{
-                    "key": "{key_id}",
-                    "amount": "1200",
-                    "currency": "INR",
-                    "name": "UPSC Predictor",
-                    "description": "1 Query Credit",
-                    "prefill": {{ 
-                        "email": "{user_email}"
-                    }},
-                    "theme": {{ "color": "#3b82f6" }},
-                    "callback_url": "{callback_url}",
-                    "redirect": true
-                }};
-                var rzp = new Razorpay(options);
-                document.getElementById('rzp-btn').onclick = function(e) {{
+                function openRazorpay() {{
+                    // Load Razorpay script in parent window and open checkout
+                    var parentDoc = window.parent.document;
+                    
+                    // Check if script already loaded
+                    if (!parentDoc.getElementById('rzp-script')) {{
+                        var script = parentDoc.createElement('script');
+                        script.id = 'rzp-script';
+                        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+                        script.onload = function() {{ launchCheckout(); }};
+                        parentDoc.head.appendChild(script);
+                    }} else {{
+                        launchCheckout();
+                    }}
+                }}
+                
+                function launchCheckout() {{
+                    var options = {{
+                        "key": "{key_id}",
+                        "amount": "1200",
+                        "currency": "INR",
+                        "name": "UPSC Predictor",
+                        "description": "1 Query Credit",
+                        "prefill": {{ 
+                            "email": "{user_email}"
+                        }},
+                        "theme": {{ "color": "#3b82f6" }},
+                        "handler": function(response) {{
+                            window.top.location.href = "{callback_url}?razorpay_payment_id=" + response.razorpay_payment_id;
+                        }}
+                    }};
+                    var rzp = new window.parent.Razorpay(options);
                     rzp.open();
-                    e.preventDefault();
-                }};
+                }}
                 </script>
             </body>
             </html>
