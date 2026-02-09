@@ -1026,10 +1026,15 @@ else:
         try:
             razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
             
-            # Direct link button - opens Razorpay payment page
+            # Pre-fill email in Razorpay Payment Page
+            import urllib.parse
+            encoded_email = urllib.parse.quote(user_email)
+            razorpay_url_with_email = f"{razorpay_url}?prefill[email]={encoded_email}"
+            
+            # Direct link button - opens Razorpay payment page with email pre-filled
             st.markdown(f"""
             <div style="text-align: center; padding: 20px 0;">
-                <a href="{razorpay_url}" target="_blank" style="
+                <a href="{razorpay_url_with_email}" target="_blank" style="
                     display: inline-block;
                     background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
                     color: white;
@@ -1054,13 +1059,10 @@ else:
         
         st.markdown("---")
         
-        # Instructions
-        st.markdown("### After payment:")
-        st.markdown("1. Complete payment using **same email**")
-        st.markdown("2. Come back here")
-        st.markdown("3. Click the button below 👇")
+        # Show refresh button as backup
+        st.markdown("*After payment, you'll return here automatically. If not, click below:*")
         
-        if st.button("🔄 Refresh Credits — Click after payment", use_container_width=True, type="primary", key="refresh_payment"):
+        if st.button("🔄 Refresh Credits", use_container_width=True, type="primary", key="refresh_payment"):
             with st.spinner("Checking for payments..."):
                 pending = check_and_credit_pending_payments(st.session_state.email)
             if pending > 0:
@@ -1073,7 +1075,7 @@ else:
                 time.sleep(1)
                 st.rerun()
             else:
-                st.warning("No new payments found. Make sure you completed the payment with the same email.")
+                st.warning("No new payments found. Make sure you completed the payment.")
         
         # Writernical trust badge
         st.markdown("---")
