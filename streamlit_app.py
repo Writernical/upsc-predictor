@@ -399,6 +399,44 @@ def process_razorpay_return():
     return False
 
 
+def process_return_email():
+    """Auto-login user returning from Razorpay payment using email in URL."""
+    params = st.query_params
+    
+    if 'return_email' not in params:
+        return False
+    
+    import urllib.parse
+    email = urllib.parse.unquote(params.get('return_email', '')).lower().strip()
+    
+    if not email:
+        st.query_params.clear()
+        return False
+    
+    # Check for pending payments and credit them
+    pending = check_and_credit_pending_payments(email)
+    
+    # Get user (may have been created by check_and_credit_pending_payments)
+    user = get_user_by_email(email)
+    
+    if user:
+        st.session_state.email = email
+        st.session_state.free_credits = user.get('free_credits', 0)
+        st.session_state.paid_credits = user.get('paid_credits', 0)
+        st.session_state.total_queries = user.get('total_queries', 0)
+        st.session_state.logged_in = True
+        st.session_state.show_payment = False
+        
+        if pending > 0:
+            st.session_state.just_paid = True
+        
+        st.query_params.clear()
+        return True
+    
+    st.query_params.clear()
+    return False
+
+
 # =============================================================================
 # QUESTION GENERATION
 # =============================================================================
@@ -576,9 +614,73 @@ def show_email_entry():
     </div>
     """, unsafe_allow_html=True)
     
+    # Quick Login toggle for returning users after payment
+    if 'quick_login_mode' not in st.session_state:
+        st.session_state.quick_login_mode = False
+    
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # Step 1: Email entry
+        # Quick Login after Payment option
+        if not st.session_state.otp_sent and not st.session_state.quick_login_mode:
+            st.markdown("---")
+            st.markdown("<p style='text-align: center; color: #64748b; font-size: 0.9rem;'>Just completed a payment?</p>", unsafe_allow_html=True)
+            if st.button("⚡ Quick Login (after payment)", use_container_width=True):
+                st.session_state.quick_login_mode = True
+                st.rerun()
+            st.markdown("---")
+        
+        # Quick Login Mode - email only, no OTP
+        if st.session_state.quick_login_mode:
+            st.markdown("""
+            <div style="background: #dbeafe; border: 1px solid #3b82f6; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+                <p style="margin: 0; color: #1e40af; font-size: 0.95rem;">⚡ <strong>Quick Login</strong><br/>
+                Enter the email you used for payment. No OTP needed if payment is verified.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            quick_email = st.text_input(
+                "quick_email",
+                placeholder="Email used for payment",
+                label_visibility="collapsed",
+                key="quick_email_input"
+            )
+            
+            col_q1, col_q2 = st.columns(2)
+            with col_q1:
+                if st.button("🔓 Login", use_container_width=True, type="primary"):
+                    if not quick_email or '@' not in quick_email:
+                        st.error("Please enter a valid email.")
+                    else:
+                        email = quick_email.lower().strip()
+                        
+                        # Check for pending payments
+                        pending = check_and_credit_pending_payments(email)
+                        user = get_user_by_email(email)
+                        
+                        if pending > 0 and user:
+                            # Payment found! Auto-login
+                            st.session_state.email = email
+                            st.session_state.free_credits = user.get('free_credits', 0)
+                            st.session_state.paid_credits = user.get('paid_credits', 0)
+                            st.session_state.total_queries = user.get('total_queries', 0)
+                            st.session_state.logged_in = True
+                            st.session_state.just_paid = True
+                            st.session_state.quick_login_mode = False
+                            st.rerun()
+                        elif user:
+                            # User exists but no new payment - need OTP
+                            st.warning("No recent payment found. Please use OTP login.")
+                        else:
+                            st.error("No account or payment found for this email.")
+            
+            with col_q2:
+                if st.button("← Back", use_container_width=True):
+                    st.session_state.quick_login_mode = False
+                    st.rerun()
+            
+            return
+        
+        # Regular email entry
         email_input = st.text_input(
             "email",
             placeholder="your.email@gmail.com",
@@ -778,6 +880,7 @@ if 'show_payment' not in st.session_state:
 # =============================================================================
 
 process_razorpay_return()
+process_return_email()
 
 
 # =============================================================================
@@ -801,11 +904,6 @@ with st.sidebar:
         st.markdown(f"📊 Used: **{st.session_state.total_queries}**")
         
         st.markdown("---")
-        
-        # Button to show payment in main area
-        if st.button("💳 Buy Credits (₹12)", use_container_width=True, type="primary", key="buy_sidebar"):
-            st.session_state.show_payment = True
-            st.rerun()
         
         # Refresh credits button
         if st.button("🔄 Refresh Credits", use_container_width=True, key="refresh_sidebar"):
@@ -841,6 +939,10 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**Follow Us**")
     st.markdown("[📺 YouTube](https://www.youtube.com/channel/UCMVxFvBmNwIdLFdq65yqTFg) • [📸 Instagram](https://www.instagram.com/upscpredictor.in)")
+    
+    # Writernical branding
+    st.markdown("---")
+    st.caption("A product by [Writernical](https://writernical.com)")
 
 
 # =============================================================================
@@ -910,160 +1012,57 @@ else:
     # Show payment section if requested or no credits
     if st.session_state.show_payment or total_credits == 0:
         
+        st.markdown("""
+        <div class="pay-box">
+            <h3>☕ ₹12 — Less than your chai</h3>
+            <p>Pay once. Get 10 practice questions instantly.<br/>
+            5 MCQs with traps + 5 Mains with answer frameworks.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        user_email = st.session_state.email
+        
+        st.info(f"📧 **Use this email in Razorpay:** {user_email}")
+        
         try:
-            import streamlit.components.v1 as components
-            key_id = st.secrets["RAZORPAY_KEY_ID"]
-            user_email = st.session_state.email
+            razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
             
-            # Get the current app URL for callback
-            callback_url = "https://upsc-predictor.streamlit.app/"
-            
-            # Payment UI with button that triggers Razorpay in PARENT window
-            checkout_html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <style>
-                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-                    body {{ 
-                        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-                        background: #ffffff;
-                        padding: 24px 16px;
-                    }}
-                    .container {{
-                        max-width: 400px;
-                        margin: 0 auto;
-                        text-align: center;
-                    }}
-                    .pay-box {{
-                        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-                        border: 2px solid #f59e0b;
-                        border-radius: 20px;
-                        padding: 28px 24px;
-                        margin-bottom: 24px;
-                    }}
-                    .pay-box h3 {{
-                        color: #92400e;
-                        font-size: 28px;
-                        margin-bottom: 16px;
-                    }}
-                    .pay-box p {{
-                        color: #78350f;
-                        font-size: 18px;
-                        line-height: 1.6;
-                    }}
-                    .email-hint {{
-                        background: #dbeafe;
-                        border-radius: 12px;
-                        padding: 16px;
-                        margin-bottom: 28px;
-                    }}
-                    .email-hint p {{
-                        color: #1e40af;
-                        font-size: 16px;
-                        margin: 0;
-                    }}
-                    #rzp-btn {{
-                        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-                        color: white;
-                        padding: 24px 40px;
-                        font-size: 22px;
-                        font-weight: 700;
-                        border-radius: 16px;
-                        border: none;
-                        cursor: pointer;
-                        box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
-                        width: 100%;
-                    }}
-                    .secure-text {{
-                        color: #64748b;
-                        font-size: 14px;
-                        margin-top: 20px;
-                    }}
-                    .note {{
-                        background: #f0fdf4;
-                        border: 1px solid #22c55e;
-                        border-radius: 12px;
-                        padding: 16px;
-                        margin-top: 28px;
-                        color: #166534;
-                        font-size: 15px;
-                        line-height: 1.5;
-                    }}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="pay-box">
-                        <h3>☕ ₹12 — Less than chai</h3>
-                        <p>Pay once. Get 10 practice questions.<br/>5 MCQs + 5 Mains with frameworks.</p>
-                    </div>
-                    
-                    <div class="email-hint">
-                        <p>📧 Paying as: <strong>{user_email}</strong></p>
-                    </div>
-                    
-                    <button id="rzp-btn" onclick="openRazorpay()">💳 Pay ₹12 Now</button>
-                    <p class="secure-text">🔒 Secure payment via Razorpay</p>
-                    
-                    <div class="note">
-                        ✅ After payment, you'll return here automatically with credit added!
-                    </div>
-                </div>
-                
-                <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-                <script>
-                function openRazorpay() {{
-                    // Load Razorpay script in parent window and open checkout
-                    var parentDoc = window.parent.document;
-                    
-                    // Check if script already loaded
-                    if (!parentDoc.getElementById('rzp-script')) {{
-                        var script = parentDoc.createElement('script');
-                        script.id = 'rzp-script';
-                        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-                        script.onload = function() {{ launchCheckout(); }};
-                        parentDoc.head.appendChild(script);
-                    }} else {{
-                        launchCheckout();
-                    }}
-                }}
-                
-                function launchCheckout() {{
-                    var options = {{
-                        "key": "{key_id}",
-                        "amount": "1200",
-                        "currency": "INR",
-                        "name": "UPSC Predictor",
-                        "description": "1 Query Credit",
-                        "prefill": {{ 
-                            "email": "{user_email}"
-                        }},
-                        "theme": {{ "color": "#3b82f6" }},
-                        "handler": function(response) {{
-                            window.top.location.href = "{callback_url}?razorpay_payment_id=" + response.razorpay_payment_id;
-                        }}
-                    }};
-                    var rzp = new window.parent.Razorpay(options);
-                    rzp.open();
-                }}
-                </script>
-            </body>
-            </html>
-            """
-            
-            components.html(checkout_html, height=650, scrolling=False)
+            # Direct link button - opens Razorpay payment page
+            st.markdown(f"""
+            <div style="text-align: center; padding: 20px 0;">
+                <a href="{razorpay_url}" target="_blank" style="
+                    display: inline-block;
+                    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+                    color: white;
+                    padding: 20px 48px;
+                    font-size: 20px;
+                    font-weight: 700;
+                    border-radius: 12px;
+                    text-decoration: none;
+                    box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
+                    width: 100%;
+                    max-width: 320px;
+                ">💳 Pay ₹12 Now</a>
+            </div>
+            <p style="text-align: center; color: #64748b; font-size: 14px; margin-top: 12px;">
+                🔒 Secure payment via Razorpay<br/>
+                UPI • Cards • Net Banking
+            </p>
+            """, unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Payment error: {str(e)}")
+            st.error(f"Payment not configured: {str(e)}")
         
         st.markdown("---")
         
-        # Backup refresh button
-        st.markdown("*Paid but not credited? Click below:*")
-        if st.button("🔄 Refresh Credits", use_container_width=True, key="refresh_payment"):
-            with st.spinner("Checking..."):
+        # Instructions
+        st.markdown("### After payment:")
+        st.markdown("1. Complete payment using **same email**")
+        st.markdown("2. Come back here")
+        st.markdown("3. Click the button below 👇")
+        
+        if st.button("🔄 Refresh Credits — Click after payment", use_container_width=True, type="primary", key="refresh_payment"):
+            with st.spinner("Checking for payments..."):
                 pending = check_and_credit_pending_payments(st.session_state.email)
             if pending > 0:
                 user = get_user_by_email(st.session_state.email)
@@ -1072,11 +1071,21 @@ else:
                     st.session_state.paid_credits = user.get('paid_credits', 0)
                 st.success(f"✅ Added {pending} credit(s)!")
                 st.session_state.show_payment = False
+                time.sleep(1)
                 st.rerun()
             else:
-                st.info("No pending payments found.")
+                st.warning("No new payments found. Make sure you completed the payment with the same email.")
+        
+        # Writernical trust badge
+        st.markdown("---")
+        st.markdown("""
+        <p style="text-align: center; color: #64748b; font-size: 13px;">
+            Payment processed by Razorpay • Billed to <a href="https://writernical.com" target="_blank" style="color: #3b82f6;">Writernical</a>
+        </p>
+        """, unsafe_allow_html=True)
         
         if total_credits > 0:
+            st.markdown("---")
             if st.button("← Back to Generator", key="back_payment"):
                 st.session_state.show_payment = False
                 st.rerun()
@@ -1130,9 +1139,18 @@ else:
                     new_total = st.session_state.free_credits + st.session_state.paid_credits
                     if new_total == 0:
                         st.markdown("---")
-                        st.info("🎯 **Liked it?** Click 'Buy Credits' in the sidebar to get more.")
+                        st.info("🎯 **Liked it?** Get more queries below!")
+                        if st.button("💳 Buy More Credits (₹12)", use_container_width=True, type="primary", key="buy_after_generate"):
+                            st.session_state.show_payment = True
+                            st.rerun()
                     
                     st.balloons()
+        
+        # Show Buy Credits option at bottom when user has credits
+        st.markdown("---")
+        if st.button("💳 Buy More Credits (₹12)", use_container_width=True, key="buy_main"):
+            st.session_state.show_payment = True
+            st.rerun()
 
 
 # =============================================================================
@@ -1246,5 +1264,6 @@ st.markdown("""
         <a href="https://www.instagram.com/upscpredictor.in" target="_blank">📸 Instagram</a>
     </div>
     <p style="font-size: 0.8rem; margin-top: 1rem;">₹12 per query — less than your chai ☕</p>
+    <p style="font-size: 0.75rem; margin-top: 0.5rem; color: #94a3b8;">A product by <a href="https://writernical.com" target="_blank" style="color: #64748b;">Writernical</a></p>
 </div>
 """, unsafe_allow_html=True)
