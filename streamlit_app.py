@@ -739,6 +739,11 @@ def show_email_entry():
                         # Get user (may have been created by check_and_credit_pending_payments)
                         user = get_user_by_email(email)
                         
+                        if debug_mode:
+                            st.write(f"DEBUG: pending={pending}, user exists={user is not None}")
+                            if user:
+                                st.write(f"DEBUG: user paid_credits={user.get('paid_credits', 0)}")
+                        
                         if pending > 0:
                             # New payment found and credited!
                             if not user:
@@ -754,6 +759,9 @@ def show_email_entry():
                                 st.session_state.logged_in = True
                                 st.session_state.just_paid = True
                                 st.session_state.quick_login_mode = False
+                                st.session_state.scroll_to_query = True
+                                st.success(f"✅ Login successful! {pending} credit(s) added.")
+                                time.sleep(1)
                                 st.rerun()
                             else:
                                 st.error("Error creating account. Please try OTP login.")
@@ -766,6 +774,9 @@ def show_email_entry():
                             st.session_state.total_queries = user.get('total_queries', 0)
                             st.session_state.logged_in = True
                             st.session_state.quick_login_mode = False
+                            st.session_state.scroll_to_query = True
+                            st.success("✅ Login successful!")
+                            time.sleep(1)
                             st.rerun()
                         
                         else:
@@ -839,8 +850,33 @@ def show_email_entry():
                     "otp",
                     placeholder="Enter 6-digit OTP",
                     label_visibility="collapsed",
-                    max_chars=6
+                    max_chars=6,
+                    key="otp_input_field"
                 )
+                
+                # Auto-scroll to this section using components.html
+                import streamlit.components.v1 as components
+                components.html("""
+                <script>
+                    // Scroll the parent window to bring OTP section into view
+                    window.parent.document.querySelector('[data-testid="stAppViewContainer"]').scrollTo({
+                        top: window.parent.document.body.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                    
+                    // Try to focus on the OTP input field
+                    setTimeout(() => {
+                        const inputs = window.parent.document.querySelectorAll('input');
+                        for (let input of inputs) {
+                            if (input.maxLength === 6 || (input.placeholder && input.placeholder.toLowerCase().includes('otp'))) {
+                                input.focus();
+                                input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                break;
+                            }
+                        }
+                    }, 300);
+                </script>
+                """, height=0)
                 
                 col_a, col_b = st.columns(2)
                 with col_a:
@@ -865,6 +901,7 @@ def show_email_entry():
                                 st.session_state.logged_in = True
                                 if pending_credits > 0:
                                     st.session_state.just_paid = True
+                                st.session_state.scroll_to_query = True
                             else:
                                 # New user
                                 create_user(email)
@@ -874,6 +911,7 @@ def show_email_entry():
                                 st.session_state.total_queries = 0
                                 st.session_state.logged_in = True
                                 st.session_state.is_new_user = True
+                                st.session_state.scroll_to_query = True
                             
                             # Reset OTP state
                             st.session_state.otp_sent = False
@@ -986,6 +1024,8 @@ if 'just_paid' not in st.session_state:
 
 if 'is_new_user' not in st.session_state:
     st.session_state.is_new_user = False
+if 'scroll_to_query' not in st.session_state:
+    st.session_state.scroll_to_query = False
 
 if 'show_payment' not in st.session_state:
     st.session_state.show_payment = False
@@ -1212,11 +1252,29 @@ else:
     elif total_credits > 0:
         st.markdown("### Enter Any Current Affairs Topic")
         
+        # Auto-scroll to query box if flag is set
+        if st.session_state.get('scroll_to_query'):
+            import streamlit.components.v1 as components
+            components.html("""
+            <script>
+                // Scroll to the query section
+                setTimeout(() => {
+                    const textareas = window.parent.document.querySelectorAll('textarea');
+                    if (textareas.length > 0) {
+                        textareas[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        textareas[0].focus();
+                    }
+                }, 300);
+            </script>
+            """, height=0)
+            st.session_state.scroll_to_query = False
+        
         topic_text = st.text_area(
             "topic",
             placeholder="Examples:\n• RBI holds repo rate at 6.5%\n• India-China LAC disengagement begins\n• Supreme Court on bulldozer justice\n• Governor delays NEET bill in Tamil Nadu",
             height=100,
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="query_input"
         )
         
         col1, col2, col3 = st.columns([1, 2, 1])
