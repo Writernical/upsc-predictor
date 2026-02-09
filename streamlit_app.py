@@ -606,6 +606,15 @@ def show_terms_and_conditions():
 
 def show_email_entry():
     """Display email + OTP entry."""
+    
+    # Initialize session state first
+    if 'otp_sent' not in st.session_state:
+        st.session_state.otp_sent = False
+    if 'otp_email' not in st.session_state:
+        st.session_state.otp_email = None
+    if 'quick_login_mode' not in st.session_state:
+        st.session_state.quick_login_mode = False
+    
     st.markdown("""
     <div class="email-box">
         <h3 style="margin: 0 0 0.5rem 0; color: #166534;">🎁 Get 1 FREE Query</h3>
@@ -613,10 +622,6 @@ def show_email_entry():
         Returning user? Login to load your credits.</p>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Quick Login toggle for returning users after payment
-    if 'quick_login_mode' not in st.session_state:
-        st.session_state.quick_login_mode = False
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -686,12 +691,6 @@ def show_email_entry():
             placeholder="your.email@gmail.com",
             label_visibility="collapsed"
         )
-        
-        # OTP state management
-        if 'otp_sent' not in st.session_state:
-            st.session_state.otp_sent = False
-        if 'otp_email' not in st.session_state:
-            st.session_state.otp_email = None
         
         if not st.session_state.otp_sent:
             # Show T&C and Send OTP button
