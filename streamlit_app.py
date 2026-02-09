@@ -294,38 +294,74 @@ def calculate_credits_from_amount(amount_paise: int) -> int:
     return max(0, credits)
 
 
-def check_and_credit_pending_payments(email: str) -> int:
+def check_and_credit_pending_payments(email: str, debug: bool = False) -> int:
     """Check Razorpay for recent payments by email and credit if not processed."""
     try:
         key_id = st.secrets["RAZORPAY_KEY_ID"]
         key_secret = st.secrets["RAZORPAY_KEY_SECRET"]
         
-        # Fetch recent payments from Razorpay (last 24 hours)
-        from_timestamp = int(time.time()) - 86400  # 24 hours ago
+        # Fetch recent payments from Razorpay (last 48 hours for safety)
+        from_timestamp = int(time.time()) - 172800  # 48 hours ago
         
         response = requests.get(
             f"https://api.razorpay.com/v1/payments",
             auth=(key_id, key_secret),
             params={
                 'from': from_timestamp,
-                'count': 50
+                'count': 100
             }
         )
         
         if response.status_code != 200:
+            if debug:
+                st.error(f"Razorpay API error: {response.status_code}")
             return 0
         
         payments = response.json().get('items', [])
         credits_added = 0
+        email_lower = email.lower().strip()
+        
+        if debug:
+            st.info(f"Searching for: {email_lower}")
+            st.info(f"Found {len(payments)} recent payments")
         
         for payment in payments:
-            # Check if this payment matches user's email and is captured
-            payment_email = payment.get('email', '').lower().strip()
+            # Get email from ALL possible fields (Payment Pages store differently)
+            payment_email = (payment.get('email') or '').lower().strip()
+            notes = payment.get('notes') or {}
+            notes_email = (notes.get('email') or notes.get('Email') or '').lower().strip()
+            
+            # Also check contact field (some Payment Pages use this)
+            contact_email = ''
+            if payment.get('contact') and '@' in str(payment.get('contact', '')):
+                contact_email = payment.get('contact', '').lower().strip()
+            
+            # Debug: show what emails we found
+            if debug:
+                payment_id = payment.get('id', '')[:20]
+                status = payment.get('status', '')
+                amount = payment.get('amount', 0) / 100
+                st.write(f"Payment {payment_id}... | Status: {status} | ₹{amount}")
+                st.write(f"  → email: '{payment_email}' | notes.email: '{notes_email}'")
+            
+            # Check any email field matches
+            email_matches = (
+                payment_email == email_lower or 
+                notes_email == email_lower or
+                contact_email == email_lower
+            )
+            
             payment_id = payment.get('id', '')
             status = payment.get('status', '')
             amount_paise = payment.get('amount', 0)
             
-            if payment_email == email.lower().strip() and status == 'captured':
+            # Accept both 'captured' and 'authorized' status
+            valid_status = status in ['captured', 'authorized']
+            
+            if email_matches and valid_status:
+                if debug:
+                    st.success(f"✓ Match found! Payment: {payment_id}")
+                
                 # Check if already processed
                 if not is_payment_processed(payment_id):
                     # Calculate credits based on amount
@@ -335,9 +371,15 @@ def check_and_credit_pending_payments(email: str) -> int:
                         if record_payment(payment_id, email):
                             add_paid_credits(email, credits_to_add)
                             credits_added += credits_to_add
+                            if debug:
+                                st.success(f"Added {credits_to_add} credits!")
+                elif debug:
+                    st.warning(f"Payment {payment_id} already processed")
         
         return credits_added
     except Exception as e:
+        if debug:
+            st.error(f"Error: {str(e)}")
         return 0
 
 
@@ -680,6 +722,9 @@ def show_email_entry():
                 key="quick_email_input"
             )
             
+            # Debug mode toggle
+            debug_mode = st.checkbox("🔍 Debug mode (show payment details)", value=False, key="debug_quick")
+            
             col_q1, col_q2 = st.columns(2)
             with col_q1:
                 if st.button("🔓 Login", use_container_width=True, type="primary"):
@@ -688,24 +733,47 @@ def show_email_entry():
                     else:
                         email = quick_email.lower().strip()
                         
-                        # Check for pending payments
-                        pending = check_and_credit_pending_payments(email)
+                        # Check for pending payments FIRST (with debug if enabled)
+                        pending = check_and_credit_pending_payments(email, debug=debug_mode)
+                        
+                        # Get user (may have been created by check_and_credit_pending_payments)
                         user = get_user_by_email(email)
                         
-                        if pending > 0 and user:
-                            # Payment found! Auto-login
+                        if pending > 0:
+                            # New payment found and credited!
+                            if not user:
+                                # Edge case: create user if somehow not created
+                                create_user(email)
+                                user = get_user_by_email(email)
+                            
+                            if user:
+                                st.session_state.email = email
+                                st.session_state.free_credits = user.get('free_credits', 0)
+                                st.session_state.paid_credits = user.get('paid_credits', 0)
+                                st.session_state.total_queries = user.get('total_queries', 0)
+                                st.session_state.logged_in = True
+                                st.session_state.just_paid = True
+                                st.session_state.quick_login_mode = False
+                                st.rerun()
+                            else:
+                                st.error("Error creating account. Please try OTP login.")
+                        
+                        elif user and user.get('paid_credits', 0) > 0:
+                            # No NEW payment, but user has paid credits (already processed)
                             st.session_state.email = email
                             st.session_state.free_credits = user.get('free_credits', 0)
                             st.session_state.paid_credits = user.get('paid_credits', 0)
                             st.session_state.total_queries = user.get('total_queries', 0)
                             st.session_state.logged_in = True
-                            st.session_state.just_paid = True
                             st.session_state.quick_login_mode = False
                             st.rerun()
-                        elif user:
-                            st.warning("No recent payment found. Use 'New User / Login' with OTP.")
+                        
                         else:
-                            st.error("No account or payment found for this email.")
+                            # No payment found at all
+                            if user:
+                                st.warning("No paid credits found. Use 'New User / Login' with OTP.")
+                            else:
+                                st.error("No payment found for this email. Pay first, then use Quick Login.")
             
             with col_q2:
                 if st.button("← Back", use_container_width=True):
