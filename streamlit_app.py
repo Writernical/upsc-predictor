@@ -998,6 +998,11 @@ if 'show_payment' not in st.session_state:
 process_razorpay_return()
 process_return_email()
 
+# Check for quick_login parameter (user returning from payment)
+if 'quick_login' in st.query_params:
+    st.session_state.quick_login_mode = True
+    st.query_params.clear()
+
 
 # =============================================================================
 # SIDEBAR
