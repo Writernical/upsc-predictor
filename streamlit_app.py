@@ -661,15 +661,9 @@ def show_terms_and_conditions():
 def show_email_entry():
     """Display email + OTP entry."""
     
-    # Initialize session state first
-    if 'otp_sent' not in st.session_state:
-        st.session_state.otp_sent = False
+    # Note: Session state is initialized globally, no need to re-initialize here
     if 'otp_email' not in st.session_state:
         st.session_state.otp_email = None
-    if 'quick_login_mode' not in st.session_state:
-        st.session_state.quick_login_mode = False
-    if 'new_user_mode' not in st.session_state:
-        st.session_state.new_user_mode = False
     
     # ===== SIDE BY SIDE OPTIONS (before any mode selected) =====
     if not st.session_state.otp_sent and not st.session_state.quick_login_mode and not st.session_state.new_user_mode:
@@ -1048,7 +1042,7 @@ process_razorpay_return()
 process_return_email()
 
 # Check for quick_login parameter (user returning from payment)
-if 'quick_login' in st.query_params:
+if 'quick_login' in st.query_params or st.query_params.get('quick_login'):
     st.session_state.quick_login_mode = True
     st.session_state.new_user_mode = False
     st.session_state.otp_sent = False
@@ -1150,32 +1144,37 @@ if st.session_state.get('is_new_user'):
 if not st.session_state.logged_in:
     # ── NOT LOGGED IN ──
     
-    st.markdown("""
-    <div class="problem-box">
-        <p><strong>The frustration you know too well:</strong> You read about "Governor delays NEET Bill" and file it under Polity. 
-        Then in the exam, UPSC asks the same topic from History (evolution of Governor's office), Federalism (Centre-State friction), 
-        and Ethics (constitutional morality). You knew the news. You just didn't know the angles.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("""
-    <div class="insight-box">
-        <p><strong>What toppers understand:</strong> UPSC doesn't test news. They test concepts through news. 
-        One headline can appear in GS-I, II, III, and IV — each time from a different angle.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # If returning from payment, show Quick Login FIRST (above marketing content)
+    if st.session_state.quick_login_mode:
+        show_email_entry()
+    else:
+        # Show marketing content for new visitors
+        st.markdown("""
+        <div class="problem-box">
+            <p><strong>The frustration you know too well:</strong> You read about "Governor delays NEET Bill" and file it under Polity. 
+            Then in the exam, UPSC asks the same topic from History (evolution of Governor's office), Federalism (Centre-State friction), 
+            and Ethics (constitutional morality). You knew the news. You just didn't know the angles.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="insight-box">
+            <p><strong>What toppers understand:</strong> UPSC doesn't test news. They test concepts through news. 
+            One headline can appear in GS-I, II, III, and IV — each time from a different angle.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-    st.markdown("### What You Get")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown('<div class="feature-card"><h4>🔀 5+5 Split</h4><p>5 questions from the obvious subject + 5 from cross-subject angles. Because UPSC asks the same topic from multiple GS papers.</p></div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="feature-card"><h4>🪤 Real Exam Traps</h4><p>"Always", "Only", "All of the above" — UPSC MCQs have patterns. Built from 1,400+ previous year questions.</p></div>', unsafe_allow_html=True)
-    with c3:
-        st.markdown('<div class="feature-card"><h4>📋 Answer Frameworks</h4><p>Word allocation, must-include cases, committees, articles — and balanced conclusions that examiners want to see.</p></div>', unsafe_allow_html=True)
-    
-    st.markdown("---")
-    show_email_entry()
+        st.markdown("### What You Get")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown('<div class="feature-card"><h4>🔀 5+5 Split</h4><p>5 questions from the obvious subject + 5 from cross-subject angles. Because UPSC asks the same topic from multiple GS papers.</p></div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown('<div class="feature-card"><h4>🪤 Real Exam Traps</h4><p>"Always", "Only", "All of the above" — UPSC MCQs have patterns. Built from 1,400+ previous year questions.</p></div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown('<div class="feature-card"><h4>📋 Answer Frameworks</h4><p>Word allocation, must-include cases, committees, articles — and balanced conclusions that examiners want to see.</p></div>', unsafe_allow_html=True)
+        
+        st.markdown("---")
+        show_email_entry()
 
 else:
     # ── LOGGED IN ──
