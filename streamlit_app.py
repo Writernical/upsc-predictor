@@ -286,6 +286,14 @@ def record_payment(payment_id: str, email: str, amount: int = 12):
         return False
 
 
+def calculate_credits_from_amount(amount_paise: int) -> int:
+    """Calculate credits based on payment amount in paise. ₹12 = 1 credit."""
+    # ₹12 per credit = 1200 paise per credit
+    # Add small tolerance for payment gateway rounding
+    credits = amount_paise // 1200
+    return max(0, credits)
+
+
 def check_and_credit_pending_payments(email: str) -> int:
     """Check Razorpay for recent payments by email and credit if not processed."""
     try:
@@ -315,14 +323,18 @@ def check_and_credit_pending_payments(email: str) -> int:
             payment_email = payment.get('email', '').lower().strip()
             payment_id = payment.get('id', '')
             status = payment.get('status', '')
+            amount_paise = payment.get('amount', 0)
             
             if payment_email == email.lower().strip() and status == 'captured':
                 # Check if already processed
                 if not is_payment_processed(payment_id):
-                    # Record and credit
-                    if record_payment(payment_id, email):
-                        add_paid_credits(email, 1)
-                        credits_added += 1
+                    # Calculate credits based on amount
+                    credits_to_add = calculate_credits_from_amount(amount_paise)
+                    if credits_to_add > 0:
+                        # Record and credit
+                        if record_payment(payment_id, email):
+                            add_paid_credits(email, credits_to_add)
+                            credits_added += credits_to_add
         
         return credits_added
     except Exception as e:
@@ -614,32 +626,50 @@ def show_email_entry():
         st.session_state.otp_email = None
     if 'quick_login_mode' not in st.session_state:
         st.session_state.quick_login_mode = False
+    if 'new_user_mode' not in st.session_state:
+        st.session_state.new_user_mode = False
     
-    st.markdown("""
-    <div class="email-box">
-        <h3 style="margin: 0 0 0.5rem 0; color: #166534;">🎁 Get 1 FREE Query</h3>
-        <p style="margin: 0; color: #15803d; font-size: 0.95rem;">New user? Verify email to claim your free query.<br/>
-        Returning user? Login to load your credits.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        # Quick Login after Payment option
-        if not st.session_state.otp_sent and not st.session_state.quick_login_mode:
-            st.markdown("---")
-            st.markdown("<p style='text-align: center; color: #64748b; font-size: 0.9rem;'>Just completed a payment?</p>", unsafe_allow_html=True)
-            if st.button("⚡ Quick Login (after payment)", use_container_width=True):
+    # ===== SIDE BY SIDE OPTIONS (before any mode selected) =====
+    if not st.session_state.otp_sent and not st.session_state.quick_login_mode and not st.session_state.new_user_mode:
+        
+        st.markdown("<h3 style='text-align: center; margin-bottom: 1.5rem;'>Welcome to UPSC Predictor</h3>", unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%); border: 2px solid #3b82f6; border-radius: 12px; padding: 1.5rem; text-align: center; height: 200px; display: flex; flex-direction: column; justify-content: center;">
+                <div style="font-size: 2rem; margin-bottom: 0.5rem;">⚡</div>
+                <h4 style="margin: 0 0 0.5rem 0; color: #1e40af;">Just Paid?</h4>
+                <p style="margin: 0; color: #1e40af; font-size: 0.85rem;">Quick login with email only.<br/>No OTP needed!</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Quick Login", use_container_width=True, type="primary", key="quick_login_btn"):
                 st.session_state.quick_login_mode = True
                 st.rerun()
-            st.markdown("---")
         
-        # Quick Login Mode - email only, no OTP
-        if st.session_state.quick_login_mode:
+        with col2:
             st.markdown("""
-            <div style="background: #dbeafe; border: 1px solid #3b82f6; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
-                <p style="margin: 0; color: #1e40af; font-size: 0.95rem;">⚡ <strong>Quick Login</strong><br/>
-                Enter the email you used for payment. No OTP needed if payment is verified.</p>
+            <div style="background: linear-gradient(135deg, #dcfce7 0%, #d1fae5 100%); border: 2px solid #22c55e; border-radius: 12px; padding: 1.5rem; text-align: center; height: 200px; display: flex; flex-direction: column; justify-content: center;">
+                <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎁</div>
+                <h4 style="margin: 0 0 0.5rem 0; color: #166534;">New User?</h4>
+                <p style="margin: 0; color: #166534; font-size: 0.85rem;">Get 1 FREE query.<br/>Verify email to start.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("New User / Login", use_container_width=True, type="secondary", key="new_user_btn"):
+                st.session_state.new_user_mode = True
+                st.rerun()
+        
+        return
+    
+    # ===== QUICK LOGIN MODE =====
+    if st.session_state.quick_login_mode:
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%); border: 2px solid #3b82f6; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
+                <h3 style="margin: 0 0 0.5rem 0; color: #1e40af;">⚡ Quick Login</h3>
+                <p style="margin: 0; color: #1e40af; font-size: 0.95rem;">Enter the email you used for payment.<br/>No OTP needed if payment is verified.</p>
             </div>
             """, unsafe_allow_html=True)
             
@@ -673,8 +703,7 @@ def show_email_entry():
                             st.session_state.quick_login_mode = False
                             st.rerun()
                         elif user:
-                            # User exists but no new payment - need OTP
-                            st.warning("No recent payment found. Please use OTP login.")
+                            st.warning("No recent payment found. Use 'New User / Login' with OTP.")
                         else:
                             st.error("No account or payment found for this email.")
             
@@ -682,106 +711,126 @@ def show_email_entry():
                 if st.button("← Back", use_container_width=True):
                     st.session_state.quick_login_mode = False
                     st.rerun()
-            
-            return
         
-        # Regular email entry
-        email_input = st.text_input(
-            "email",
-            placeholder="your.email@gmail.com",
-            label_visibility="collapsed"
-        )
-        
-        if not st.session_state.otp_sent:
-            # Show T&C and Send OTP button
-            show_terms_and_conditions()
-            tc_agreed = st.checkbox("I agree to the Terms & Conditions", value=False)
+        return
+    
+    # ===== NEW USER / REGULAR LOGIN MODE =====
+    if st.session_state.new_user_mode or st.session_state.otp_sent:
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if not st.session_state.otp_sent:
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #dcfce7 0%, #d1fae5 100%); border: 2px solid #22c55e; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
+                    <h3 style="margin: 0 0 0.5rem 0; color: #166534;">🎁 New User? Get 1 FREE Query</h3>
+                    <p style="margin: 0; color: #166534; font-size: 0.95rem;">Returning user? Login to access your credits.</p>
+                </div>
+                """, unsafe_allow_html=True)
             
-            if st.button("📧 Send OTP", use_container_width=True, type="primary"):
-                if not tc_agreed:
-                    st.warning("Please agree to the Terms & Conditions.")
-                elif not email_input or '@' not in email_input or '.' not in email_input:
-                    st.error("Please enter a valid email address.")
-                else:
-                    # Generate and send OTP
-                    otp = generate_otp()
-                    if save_otp(email_input, otp) and send_otp_email(email_input, otp):
-                        st.session_state.otp_sent = True
-                        st.session_state.otp_email = email_input.lower().strip()
-                        st.rerun()
-                    else:
-                        st.error("Could not send OTP. Please try again.")
-        else:
-            # Show OTP entry
-            st.success(f"✅ OTP sent to {st.session_state.otp_email}")
-            st.markdown("""
-            <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 0.75rem; margin: 0.5rem 0;">
-                <p style="margin: 0; color: #92400e; font-size: 0.9rem;">📬 <strong>Don't see the email?</strong> Check your <strong>Spam/Junk folder</strong>. The email comes from "UPSC Predictor".</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            otp_input = st.text_input(
-                "otp",
-                placeholder="Enter 6-digit OTP",
-                label_visibility="collapsed",
-                max_chars=6
+            # Regular email entry
+            email_input = st.text_input(
+                "email",
+                placeholder="your.email@gmail.com",
+                label_visibility="collapsed"
             )
             
-            col_a, col_b = st.columns(2)
-            with col_a:
-                if st.button("✓ Verify OTP", use_container_width=True, type="primary"):
-                    if not otp_input or len(otp_input) != 6:
-                        st.error("Please enter 6-digit OTP.")
-                    elif verify_otp(st.session_state.otp_email, otp_input):
-                        # OTP verified - login or create user
-                        email = st.session_state.otp_email
-                        
-                        # Check for pending Razorpay payments BEFORE loading user
-                        pending_credits = check_and_credit_pending_payments(email)
-                        
-                        user = get_user_by_email(email)
-                        
-                        if user:
-                            # Returning user
-                            st.session_state.email = email
-                            st.session_state.free_credits = user.get('free_credits', 0)
-                            st.session_state.paid_credits = user.get('paid_credits', 0)
-                            st.session_state.total_queries = user.get('total_queries', 0)
-                            st.session_state.logged_in = True
-                            if pending_credits > 0:
-                                st.session_state.just_paid = True
+            if not st.session_state.otp_sent:
+                # Show T&C and Send OTP button
+                show_terms_and_conditions()
+                tc_agreed = st.checkbox("I agree to the Terms & Conditions", value=False)
+                
+                col_send, col_back = st.columns([2, 1])
+                with col_send:
+                    if st.button("📧 Send OTP", use_container_width=True, type="primary"):
+                        if not tc_agreed:
+                            st.warning("Please agree to the Terms & Conditions.")
+                        elif not email_input or '@' not in email_input or '.' not in email_input:
+                            st.error("Please enter a valid email address.")
                         else:
-                            # New user
-                            create_user(email)
-                            st.session_state.email = email
-                            st.session_state.free_credits = 1
-                            st.session_state.paid_credits = pending_credits
-                            st.session_state.total_queries = 0
-                            st.session_state.logged_in = True
-                            st.session_state.is_new_user = True
-                        
-                        # Reset OTP state
+                            # Generate and send OTP
+                            otp = generate_otp()
+                            if save_otp(email_input, otp) and send_otp_email(email_input, otp):
+                                st.session_state.otp_sent = True
+                                st.session_state.otp_email = email_input.lower().strip()
+                                st.rerun()
+                            else:
+                                st.error("Could not send OTP. Please try again.")
+                with col_back:
+                    if st.button("← Back", use_container_width=True, key="back_from_new"):
+                        st.session_state.new_user_mode = False
+                        st.rerun()
+            else:
+                # Show OTP entry
+                st.success(f"✅ OTP sent to {st.session_state.otp_email}")
+                st.markdown("""
+                <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 0.75rem; margin: 0.5rem 0;">
+                    <p style="margin: 0; color: #92400e; font-size: 0.9rem;">📬 <strong>Don't see the email?</strong> Check your <strong>Spam/Junk folder</strong>. The email comes from "UPSC Predictor".</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                otp_input = st.text_input(
+                    "otp",
+                    placeholder="Enter 6-digit OTP",
+                    label_visibility="collapsed",
+                    max_chars=6
+                )
+                
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("✓ Verify OTP", use_container_width=True, type="primary"):
+                        if not otp_input or len(otp_input) != 6:
+                            st.error("Please enter 6-digit OTP.")
+                        elif verify_otp(st.session_state.otp_email, otp_input):
+                            # OTP verified - login or create user
+                            email = st.session_state.otp_email
+                            
+                            # Check for pending Razorpay payments BEFORE loading user
+                            pending_credits = check_and_credit_pending_payments(email)
+                            
+                            user = get_user_by_email(email)
+                            
+                            if user:
+                                # Returning user
+                                st.session_state.email = email
+                                st.session_state.free_credits = user.get('free_credits', 0)
+                                st.session_state.paid_credits = user.get('paid_credits', 0)
+                                st.session_state.total_queries = user.get('total_queries', 0)
+                                st.session_state.logged_in = True
+                                if pending_credits > 0:
+                                    st.session_state.just_paid = True
+                            else:
+                                # New user
+                                create_user(email)
+                                st.session_state.email = email
+                                st.session_state.free_credits = 1
+                                st.session_state.paid_credits = pending_credits
+                                st.session_state.total_queries = 0
+                                st.session_state.logged_in = True
+                                st.session_state.is_new_user = True
+                            
+                            # Reset OTP state
+                            st.session_state.otp_sent = False
+                            st.session_state.otp_email = None
+                            st.session_state.new_user_mode = False
+                            st.rerun()
+                        else:
+                            st.error("Invalid or expired OTP. Please try again.")
+                
+                with col_b:
+                    if st.button("← Back", use_container_width=True, key="back_from_otp"):
                         st.session_state.otp_sent = False
                         st.session_state.otp_email = None
+                        st.session_state.new_user_mode = False
                         st.rerun()
+                
+                # Resend OTP option
+                st.markdown("---")
+                st.markdown("<p style='text-align: center; color: #64748b; font-size: 0.85rem;'>Didn't receive OTP?</p>", unsafe_allow_html=True)
+                if st.button("🔄 Resend OTP", use_container_width=True):
+                    otp = generate_otp()
+                    if save_otp(st.session_state.otp_email, otp) and send_otp_email(st.session_state.otp_email, otp):
+                        st.success("✅ New OTP sent! Check your email.")
                     else:
-                        st.error("Invalid or expired OTP. Please try again.")
-            
-            with col_b:
-                if st.button("← Change Email", use_container_width=True):
-                    st.session_state.otp_sent = False
-                    st.session_state.otp_email = None
-                    st.rerun()
-            
-            # Resend OTP option
-            st.markdown("---")
-            st.markdown("<p style='text-align: center; color: #64748b; font-size: 0.85rem;'>Didn't receive OTP?</p>", unsafe_allow_html=True)
-            if st.button("🔄 Resend OTP", use_container_width=True):
-                otp = generate_otp()
-                if save_otp(st.session_state.otp_email, otp) and send_otp_email(st.session_state.otp_email, otp):
-                    st.success("✅ New OTP sent! Check your email.")
-                else:
-                    st.error("Could not resend OTP. Please try again.")
+                        st.error("Could not resend OTP. Please try again.")
 
 
 def show_payment_section():
@@ -1013,26 +1062,22 @@ else:
         
         st.markdown("""
         <div class="pay-box">
-            <h3>☕ ₹12 — Less than your chai</h3>
-            <p>Pay once. Get 10 practice questions instantly.<br/>
-            5 MCQs with traps + 5 Mains with answer frameworks.</p>
+            <h3>🎯 Buy Credits</h3>
+            <p>₹12 per credit • Each credit = 10 UPSC-style questions<br/>
+            Select quantity on Razorpay checkout page</p>
         </div>
         """, unsafe_allow_html=True)
         
         user_email = st.session_state.email
-        
         st.info(f"📧 **Use this email in Razorpay:** {user_email}")
         
         try:
             razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
             
-            # Pre-fill email in Razorpay Payment Page
-            # Payment Pages use prefill_email (not prefill[email])
             import urllib.parse
             encoded_email = urllib.parse.quote(user_email)
             razorpay_url_with_email = f"{razorpay_url}?prefill_email={encoded_email}"
             
-            # Direct link button - opens Razorpay payment page with email pre-filled
             st.markdown(f"""
             <div style="text-align: center; padding: 20px 0;">
                 <a href="{razorpay_url_with_email}" target="_blank" style="
@@ -1047,11 +1092,10 @@ else:
                     box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
                     width: 100%;
                     max-width: 320px;
-                ">💳 Pay ₹12 Now</a>
+                ">💳 Buy Credits</a>
             </div>
             <p style="text-align: center; color: #64748b; font-size: 14px; margin-top: 12px;">
-                🔒 Secure payment via Razorpay<br/>
-                UPI • Cards • Net Banking
+                🔒 Secure payment via Razorpay • UPI • Cards • Net Banking
             </p>
             """, unsafe_allow_html=True)
             
@@ -1060,8 +1104,8 @@ else:
         
         st.markdown("---")
         
-        # Show refresh button as backup
-        st.markdown("*After payment, you'll return here automatically. If not, click below:*")
+        # Show refresh button
+        st.markdown("*After payment, click below to add credits:*")
         
         if st.button("🔄 Refresh Credits", use_container_width=True, type="primary", key="refresh_payment"):
             with st.spinner("Checking for payments..."):
