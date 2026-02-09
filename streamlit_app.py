@@ -1027,9 +1027,10 @@ else:
             razorpay_url = st.secrets["RAZORPAY_PAYMENT_URL"]
             
             # Pre-fill email in Razorpay Payment Page
+            # Payment Pages use prefill_email (not prefill[email])
             import urllib.parse
             encoded_email = urllib.parse.quote(user_email)
-            razorpay_url_with_email = f"{razorpay_url}?prefill[email]={encoded_email}"
+            razorpay_url_with_email = f"{razorpay_url}?prefill_email={encoded_email}"
             
             # Direct link button - opens Razorpay payment page with email pre-filled
             st.markdown(f"""
