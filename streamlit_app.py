@@ -1030,6 +1030,15 @@ if 'scroll_to_query' not in st.session_state:
 if 'show_payment' not in st.session_state:
     st.session_state.show_payment = False
 
+if 'quick_login_mode' not in st.session_state:
+    st.session_state.quick_login_mode = False
+
+if 'new_user_mode' not in st.session_state:
+    st.session_state.new_user_mode = False
+
+if 'otp_sent' not in st.session_state:
+    st.session_state.otp_sent = False
+
 
 # =============================================================================
 # PROCESS RAZORPAY RETURN
@@ -1041,7 +1050,10 @@ process_return_email()
 # Check for quick_login parameter (user returning from payment)
 if 'quick_login' in st.query_params:
     st.session_state.quick_login_mode = True
+    st.session_state.new_user_mode = False
+    st.session_state.otp_sent = False
     st.query_params.clear()
+    st.rerun()
 
 
 # =============================================================================
