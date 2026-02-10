@@ -1130,25 +1130,25 @@ with st.sidebar:
     st.markdown("**Follow Us**")
     st.markdown("[📺 YouTube](https://www.youtube.com/channel/UCMVxFvBmNwIdLFdq65yqTFg) • [📸 Instagram](https://www.instagram.com/upscpredictor.in)")
     
+    # Affiliate links - UPSC Books
+    st.markdown("---")
+    st.markdown("**📚 Recommended Books**")
+    st.markdown("""
+- [Indian Polity - Laxmikanth](#)
+- [Indian Economy - Ramesh Singh](#)
+- [Geography - Majid Husain](#)
+- [Modern History - Spectrum](#)
+""")
+    st.caption("*Affiliate links - we may earn a commission*")
+    
     # Writernical branding
     st.markdown("---")
     st.caption("A product by [Writernical](https://writernical.com)")
 
 
 # =============================================================================
-# HERO
+# STATUS BANNERS
 # =============================================================================
-
-st.markdown("""
-<div class="hero">
-    <h1>From Today's Newspaper to Tomorrow's Answer Sheet</h1>
-    <p class="hero-sub">
-        You read current affairs daily. But there's a gap between what you read and how UPSC asks. 
-        This tool bridges that gap.
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
 
 # Status banners
 if st.session_state.just_paid:
