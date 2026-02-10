@@ -747,64 +747,81 @@ def show_email_entry():
             
             col_q1, col_q2 = st.columns(2)
             with col_q1:
-                if st.button("🔓 Login", use_container_width=True, type="primary"):
-                    if not quick_email or '@' not in quick_email:
-                        st.error("Please enter a valid email.")
-                    else:
-                        email = quick_email.lower().strip()
+                login_clicked = st.button("🔓 Login", use_container_width=True, type="primary", key="quick_login_submit")
+            with col_q2:
+                if st.button("← Back", use_container_width=True, key="quick_login_back"):
+                    st.session_state.quick_login_mode = False
+                    st.rerun()
+            
+            if login_clicked:
+                if not quick_email or '@' not in quick_email:
+                    st.error("Please enter a valid email.")
+                else:
+                    email = quick_email.lower().strip()
+                    
+                    # Show prominent loading indicator
+                    loading_placeholder = st.empty()
+                    loading_placeholder.markdown("""
+                    <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 2px solid #f59e0b; border-radius: 12px; padding: 2rem; text-align: center; margin: 1rem 0;">
+                        <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">⏳</div>
+                        <h3 style="margin: 0; color: #92400e;">Verifying Payment...</h3>
+                        <p style="margin: 0.5rem 0 0 0; color: #a16207;">Please wait, checking Razorpay for your payment</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Small delay to ensure loading indicator renders
+                    time.sleep(0.1)
+                    
+                    # Check for pending payments
+                    pending = check_and_credit_pending_payments(email)
+                    
+                    # Get user (may have been created by check_and_credit_pending_payments)
+                    user = get_user_by_email(email)
+                    
+                    # Clear loading
+                    loading_placeholder.empty()
+                    
+                    if pending > 0:
+                        # New payment found and credited!
+                        if not user:
+                            # Edge case: create user if somehow not created
+                            create_user(email)
+                            user = get_user_by_email(email)
                         
-                        # Check for pending payments
-                        pending = check_and_credit_pending_payments(email)
-                        
-                        # Get user (may have been created by check_and_credit_pending_payments)
-                        user = get_user_by_email(email)
-                        
-                        if pending > 0:
-                            # New payment found and credited!
-                            if not user:
-                                # Edge case: create user if somehow not created
-                                create_user(email)
-                                user = get_user_by_email(email)
-                            
-                            if user:
-                                st.session_state.email = email
-                                st.session_state.free_credits = user.get('free_credits', 0)
-                                st.session_state.paid_credits = user.get('paid_credits', 0)
-                                st.session_state.total_queries = user.get('total_queries', 0)
-                                st.session_state.logged_in = True
-                                st.session_state.just_paid = True
-                                st.session_state.quick_login_mode = False
-                                st.session_state.scroll_to_query = True
-                                st.success(f"✅ Login successful! {pending} credit(s) added.")
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error("Error creating account. Please try OTP login.")
-                        
-                        elif user and user.get('paid_credits', 0) > 0:
-                            # No NEW payment, but user has paid credits (already processed)
+                        if user:
                             st.session_state.email = email
                             st.session_state.free_credits = user.get('free_credits', 0)
                             st.session_state.paid_credits = user.get('paid_credits', 0)
                             st.session_state.total_queries = user.get('total_queries', 0)
                             st.session_state.logged_in = True
+                            st.session_state.just_paid = True
                             st.session_state.quick_login_mode = False
                             st.session_state.scroll_to_query = True
-                            st.success("✅ Login successful!")
+                            st.success(f"✅ Login successful! {pending} credit(s) added.")
                             time.sleep(1)
                             st.rerun()
-                        
                         else:
-                            # No payment found at all
-                            if user:
-                                st.warning("No paid credits found. Use 'New User / Login' with OTP.")
-                            else:
-                                st.error("No payment found for this email. Pay first, then use Quick Login.")
-            
-            with col_q2:
-                if st.button("← Back", use_container_width=True):
-                    st.session_state.quick_login_mode = False
-                    st.rerun()
+                            st.error("Error creating account. Please try OTP login.")
+                    
+                    elif user and user.get('paid_credits', 0) > 0:
+                        # No NEW payment, but user has paid credits (already processed)
+                        st.session_state.email = email
+                        st.session_state.free_credits = user.get('free_credits', 0)
+                        st.session_state.paid_credits = user.get('paid_credits', 0)
+                        st.session_state.total_queries = user.get('total_queries', 0)
+                        st.session_state.logged_in = True
+                        st.session_state.quick_login_mode = False
+                        st.session_state.scroll_to_query = True
+                        st.success("✅ Login successful!")
+                        time.sleep(1)
+                        st.rerun()
+                    
+                    else:
+                        # No payment found at all
+                        if user:
+                            st.warning("No paid credits found. Use 'New User / Login' with OTP.")
+                        else:
+                            st.error("No payment found for this email. Pay first, then use Quick Login.")
         
         return
     
@@ -834,26 +851,40 @@ def show_email_entry():
                 
                 col_send, col_back = st.columns([2, 1])
                 with col_send:
-                    if st.button("📧 Send OTP", use_container_width=True, type="primary"):
-                        if not tc_agreed:
-                            st.warning("Please agree to the Terms & Conditions.")
-                        elif not email_input or '@' not in email_input or '.' not in email_input:
-                            st.error("Please enter a valid email address.")
-                        elif is_disposable_email(email_input):
-                            st.error("⚠️ Temporary/disposable emails are not allowed. Please use Gmail, Outlook, Yahoo, or your personal email.")
-                        else:
-                            # Generate and send OTP
-                            otp = generate_otp()
-                            if save_otp(email_input, otp) and send_otp_email(email_input, otp):
-                                st.session_state.otp_sent = True
-                                st.session_state.otp_email = email_input.lower().strip()
-                                st.rerun()
-                            else:
-                                st.error("Could not send OTP. Please try again.")
+                    send_clicked = st.button("📧 Send OTP", use_container_width=True, type="primary", key="send_otp_btn")
                 with col_back:
                     if st.button("← Back", use_container_width=True, key="back_from_new"):
                         st.session_state.new_user_mode = False
                         st.rerun()
+                
+                if send_clicked:
+                    if not tc_agreed:
+                        st.warning("Please agree to the Terms & Conditions.")
+                    elif not email_input or '@' not in email_input or '.' not in email_input:
+                        st.error("Please enter a valid email address.")
+                    elif is_disposable_email(email_input):
+                        st.error("⚠️ Temporary/disposable emails are not allowed. Please use Gmail, Outlook, Yahoo, or your personal email.")
+                    else:
+                        # Show loading indicator
+                        loading_placeholder = st.empty()
+                        loading_placeholder.markdown("""
+                        <div style="background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%); border: 2px solid #22c55e; border-radius: 12px; padding: 1.5rem; text-align: center; margin: 1rem 0;">
+                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">📧</div>
+                            <h3 style="margin: 0; color: #166534;">Sending OTP...</h3>
+                            <p style="margin: 0.5rem 0 0 0; color: #15803d;">Please wait</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Generate and send OTP
+                        otp = generate_otp()
+                        if save_otp(email_input, otp) and send_otp_email(email_input, otp):
+                            loading_placeholder.empty()
+                            st.session_state.otp_sent = True
+                            st.session_state.otp_email = email_input.lower().strip()
+                            st.rerun()
+                        else:
+                            loading_placeholder.empty()
+                            st.error("Could not send OTP. Please try again.")
             else:
                 # Show OTP entry
                 st.success(f"✅ OTP sent to {st.session_state.otp_email}")
@@ -897,10 +928,29 @@ def show_email_entry():
                 
                 col_a, col_b = st.columns(2)
                 with col_a:
-                    if st.button("✓ Verify OTP", use_container_width=True, type="primary"):
-                        if not otp_input or len(otp_input) != 6:
-                            st.error("Please enter 6-digit OTP.")
-                        elif verify_otp(st.session_state.otp_email, otp_input):
+                    verify_clicked = st.button("✓ Verify OTP", use_container_width=True, type="primary", key="verify_otp_btn")
+                with col_b:
+                    if st.button("← Back", use_container_width=True, key="back_from_otp"):
+                        st.session_state.otp_sent = False
+                        st.session_state.otp_email = None
+                        st.session_state.new_user_mode = False
+                        st.rerun()
+                
+                if verify_clicked:
+                    if not otp_input or len(otp_input) != 6:
+                        st.error("Please enter 6-digit OTP.")
+                    else:
+                        # Show loading indicator
+                        loading_placeholder = st.empty()
+                        loading_placeholder.markdown("""
+                        <div style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border: 2px solid #3b82f6; border-radius: 12px; padding: 1.5rem; text-align: center; margin: 1rem 0;">
+                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">🔐</div>
+                            <h3 style="margin: 0; color: #1e40af;">Verifying OTP...</h3>
+                            <p style="margin: 0.5rem 0 0 0; color: #1d4ed8;">Please wait</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        if verify_otp(st.session_state.otp_email, otp_input):
                             # OTP verified - login or create user
                             email = st.session_state.otp_email
                             
@@ -908,6 +958,8 @@ def show_email_entry():
                             pending_credits = check_and_credit_pending_payments(email)
                             
                             user = get_user_by_email(email)
+                            
+                            loading_placeholder.empty()
                             
                             if user:
                                 # Returning user
@@ -936,14 +988,8 @@ def show_email_entry():
                             st.session_state.new_user_mode = False
                             st.rerun()
                         else:
+                            loading_placeholder.empty()
                             st.error("Invalid or expired OTP. Please try again.")
-                
-                with col_b:
-                    if st.button("← Back", use_container_width=True, key="back_from_otp"):
-                        st.session_state.otp_sent = False
-                        st.session_state.otp_email = None
-                        st.session_state.new_user_mode = False
-                        st.rerun()
                 
                 # Resend OTP option
                 st.markdown("---")
@@ -1233,9 +1279,22 @@ else:
         # Show refresh button
         st.markdown("*After payment, click below to add credits:*")
         
-        if st.button("🔄 Refresh Credits", use_container_width=True, type="primary", key="refresh_payment"):
-            with st.spinner("Checking for payments..."):
-                pending = check_and_credit_pending_payments(st.session_state.email)
+        refresh_clicked = st.button("🔄 Refresh Credits", use_container_width=True, type="primary", key="refresh_payment")
+        
+        if refresh_clicked:
+            # Show prominent loading indicator
+            loading_placeholder = st.empty()
+            loading_placeholder.markdown("""
+            <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 2px solid #f59e0b; border-radius: 12px; padding: 1.5rem; text-align: center; margin: 1rem 0;">
+                <div style="font-size: 2rem; margin-bottom: 0.5rem;">⏳</div>
+                <h3 style="margin: 0; color: #92400e;">Checking Payments...</h3>
+                <p style="margin: 0.5rem 0 0 0; color: #a16207;">Verifying with Razorpay</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            pending = check_and_credit_pending_payments(st.session_state.email)
+            loading_placeholder.empty()
+            
             if pending > 0:
                 user = get_user_by_email(st.session_state.email)
                 if user:
@@ -1298,7 +1357,22 @@ else:
             if not topic_text or len(topic_text.strip()) < 5:
                 st.warning("Please enter a topic (at least a few words)")
             else:
+                # Show prominent loading indicator
+                loading_placeholder = st.empty()
+                loading_placeholder.markdown("""
+                <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 2px solid #f59e0b; border-radius: 12px; padding: 2rem; text-align: center; margin: 1rem 0;">
+                    <div style="font-size: 3rem; margin-bottom: 0.5rem;">⏳</div>
+                    <h2 style="margin: 0; color: #92400e;">Generating Questions...</h2>
+                    <p style="margin: 0.5rem 0 0 0; color: #a16207; font-size: 1.1rem;">This takes 20-30 seconds. Please don't refresh!</p>
+                    <p style="margin: 1rem 0 0 0; color: #b45309; font-size: 0.9rem;">🤖 AI is analyzing multi-angle perspectives...</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
                 output = generate_questions(topic_text)
+                
+                # Clear loading
+                loading_placeholder.empty()
+                
                 if output:
                     # Deduct credit - free first, then paid
                     if st.session_state.free_credits > 0:
