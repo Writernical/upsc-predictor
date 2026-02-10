@@ -1168,20 +1168,55 @@ with st.sidebar:
         st.markdown("**₹12 per query**")
         st.markdown("*1 FREE query for new users*")
     
+    # ===== TELEGRAM BOT - PROMINENT =====
+    st.markdown("---")
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #0088cc 0%, #00aced 100%); border-radius: 12px; padding: 1rem; text-align: center; margin-bottom: 0.5rem;">
+        <div style="font-size: 2rem;">🤖</div>
+        <h4 style="margin: 0.5rem 0; color: white; font-size: 1rem;">Use on Telegram!</h4>
+        <p style="margin: 0; color: rgba(255,255,255,0.9); font-size: 0.8rem;">Same features, same credits</p>
+        <a href="https://t.me/upsc_predictor_bot" target="_blank" style="display: inline-block; background: white; color: #0088cc; padding: 0.5rem 1rem; border-radius: 8px; text-decoration: none; font-weight: 600; margin-top: 0.75rem; font-size: 0.85rem;">
+            Open @upsc_predictor_bot →
+        </a>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # ===== HOW CREDITS WORK =====
+    with st.expander("ℹ️ How Credits Work"):
+        st.markdown("""
+        **Pricing:** ₹12 per credit
+        
+        **1 credit = 10 questions:**
+        - 5 MCQs (Prelims style)
+        - 5 Mains questions
+        
+        **Cross-Platform:**
+        - Credits work on web AND Telegram
+        - Use same email on both platforms
+        - Use /link command on Telegram to sync
+        
+        **How to Buy:**
+        1. Click "Buy Credits" button
+        2. Pay via Razorpay
+        3. Use Quick Login to see credits
+        """)
+    
+    
+    # ===== FOLLOW US - WITH REAL ICONS =====
     st.markdown("---")
     st.markdown("**Follow Us**")
-    st.markdown("[📺 YouTube](https://www.youtube.com/channel/UCMVxFvBmNwIdLFdq65yqTFg) • [📸 Instagram](https://www.instagram.com/upscpredictor.in)")
-    
-    # Affiliate links - UPSC Books
-    st.markdown("---")
-    st.markdown("**📚 Recommended Books**")
     st.markdown("""
-- [Indian Polity - Laxmikanth](#)
-- [Indian Economy - Ramesh Singh](#)
-- [Geography - Majid Husain](#)
-- [Modern History - Spectrum](#)
-""")
-    st.caption("*Affiliate links - we may earn a commission*")
+    <div style="display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem;">
+        <a href="https://www.youtube.com/channel/UCMVxFvBmNwIdLFdq65yqTFg" target="_blank" style="text-decoration: none; display: flex; align-items: center; gap: 0.3rem; color: #ef4444;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="#ef4444"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+            YouTube
+        </a>
+        <a href="https://www.instagram.com/upscpredictor.in" target="_blank" style="text-decoration: none; display: flex; align-items: center; gap: 0.3rem; color: #e1306c;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="#e1306c"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+            Instagram
+        </a>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Writernical branding
     st.markdown("---")
