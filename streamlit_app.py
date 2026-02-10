@@ -52,55 +52,50 @@ supabase = get_supabase_client()
 
 
 # =============================================================================
-# ANTI-ABUSE: DISPOSABLE EMAIL BLOCKING
+# ANTI-ABUSE: EMAIL WHITELIST (STRICT)
 # =============================================================================
 
-# Common disposable email domains (blocks ~95% of temp emails)
-DISPOSABLE_EMAIL_DOMAINS = {
-    'tempmail.com', 'temp-mail.org', 'guerrillamail.com', 'guerrillamail.org',
-    'sharklasers.com', 'grr.la', 'guerrillamail.net', 'guerrillamail.biz',
-    'mailinator.com', 'mailinator2.com', 'notmailinator.com', 'maildrop.cc',
-    '10minutemail.com', '10minutemail.net', '10minmail.com', 'minutemail.com',
-    'throwaway.email', 'throwawaymail.com', 'tempinbox.com', 'fakeinbox.com',
-    'trashmail.com', 'trashmail.net', 'trashemail.de', 'trashmail.ws',
-    'mailnesia.com', 'mailcatch.com', 'mail-temp.com', 'tempail.com',
-    'yopmail.com', 'yopmail.fr', 'yopmail.net', 'cool.fr.nf', 'jetable.fr.nf',
-    'nospam.ze.tc', 'nomail.xl.cx', 'mega.zik.dj', 'speed.1s.fr', 'courriel.fr.nf',
-    'moncourrier.fr.nf', 'monemail.fr.nf', 'monmail.fr.nf',
-    'getnada.com', 'abyssmail.com', 'boximail.com', 'clrmail.com',
-    'dropjar.com', 'getairmail.com', 'givmail.com', 'inboxbear.com',
-    'trbvm.com', 'zetmail.com', 'mohmal.com', 'tempmailo.com',
-    'burnermail.io', 'dispostable.com', 'emailondeck.com', 'fakemail.net',
-    'mytemp.email', 'tempmailaddress.com', 'tmpmail.org', 'tmpmail.net',
-    'discard.email', 'discardmail.com', 'spamgourmet.com', 'mailexpire.com',
-    'anonymmail.net', 'mintemail.com', 'tempsky.com', 'emailfake.com',
-    'crazymailing.com', 'mailnator.com', 'spambox.us', 'spam4.me',
-    'binkmail.com', 'safetymail.info', 'mailslite.com', 'tempr.email',
-    'disbox.net', 'disbox.org', 'emailisvalid.com', 'vomoto.com',
-    'maildax.com', 'mailfa.tk', 'inboxalias.com', 'emailtemporar.ro',
-    'fakemailgenerator.com', 'generator.email', 'emlhub.com', 'emlpro.com',
-    'emltmp.com', 'tempemailco.com', 'tempemail.net', 'tempmail.net',
-    'tempmailer.com', 'tempmails.com', 'tempmailx.com', 'tmpemails.com'
+# Only allow these trusted email domains
+ALLOWED_EMAIL_DOMAINS = {
+    # Gmail
+    'gmail.com', 'googlemail.com',
+    # Microsoft
+    'outlook.com', 'outlook.in', 'hotmail.com', 'hotmail.in', 'live.com', 'live.in', 'msn.com',
+    # Yahoo
+    'yahoo.com', 'yahoo.in', 'yahoo.co.in', 'ymail.com', 'rocketmail.com',
+    # Apple
+    'icloud.com', 'me.com', 'mac.com',
+    # India specific
+    'rediffmail.com', 'rediff.com', 'sify.com',
+    # ProtonMail (legitimate privacy)
+    'protonmail.com', 'proton.me', 'pm.me',
+    # Zoho
+    'zoho.com', 'zohomail.in', 'zohomail.com',
+    # AOL
+    'aol.com',
 }
 
 
-def is_disposable_email(email: str) -> bool:
-    """Check if email is from a disposable/temporary email provider."""
+def is_allowed_email(email: str) -> bool:
+    """Check if email is from an allowed domain (whitelist only)."""
     try:
         domain = email.lower().split('@')[1]
         
-        # Block known disposable domains
-        if domain in DISPOSABLE_EMAIL_DOMAINS:
+        # Direct match with allowed domains
+        if domain in ALLOWED_EMAIL_DOMAINS:
             return True
         
-        # Block if contains suspicious keywords
-        suspicious_keywords = ['temp', 'fake', 'trash', 'spam', 'disposable', 'throwaway', 'guerrilla']
-        if any(kw in domain for kw in suspicious_keywords):
+        # Allow educational domains (.edu, .ac.in, etc.)
+        if domain.endswith('.edu') or domain.endswith('.ac.in') or domain.endswith('.edu.in'):
+            return True
+        
+        # Allow government domains
+        if domain.endswith('.gov') or domain.endswith('.gov.in') or domain.endswith('.nic.in'):
             return True
         
         return False
     except:
-        return True  # Block malformed emails
+        return False
 
 # =============================================================================
 # CSS
@@ -843,6 +838,7 @@ def show_email_entry():
                 placeholder="your.email@gmail.com",
                 label_visibility="collapsed"
             )
+            st.caption("✅ Allowed: Gmail, Outlook, Yahoo, iCloud, Protonmail, .edu, .gov.in")
             
             if not st.session_state.otp_sent:
                 # Show T&C and Send OTP button
@@ -862,8 +858,8 @@ def show_email_entry():
                         st.warning("Please agree to the Terms & Conditions.")
                     elif not email_input or '@' not in email_input or '.' not in email_input:
                         st.error("Please enter a valid email address.")
-                    elif is_disposable_email(email_input):
-                        st.error("⚠️ Temporary/disposable emails are not allowed. Please use Gmail, Outlook, Yahoo, or your personal email.")
+                    elif not is_allowed_email(email_input):
+                        st.error("⚠️ Please use Gmail, Outlook, Yahoo, iCloud, or Protonmail. Temporary emails are not allowed.")
                     else:
                         # Show loading indicator
                         loading_placeholder = st.empty()
