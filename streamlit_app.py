@@ -1167,29 +1167,12 @@ if st.session_state.get('is_new_user'):
 if not st.session_state.logged_in:
     # ── NOT LOGGED IN ──
     
-    # Clean, minimal login interface
+    # Clean header with Writernical branding
     st.markdown("""
-    <div style="text-align: center; padding: 2rem 0 1rem 0;">
+    <div style="text-align: center; padding: 1.5rem 0 1rem 0;">
+        <p style="margin: 0 0 0.5rem 0; font-size: 0.8rem; color: #64748b;">A product by <a href="https://writernical.com" target="_blank" style="color: #3b82f6; text-decoration: none; font-weight: 600;">Writernical</a></p>
         <h2 style="margin: 0; color: #1e293b;">UPSC Multi-Angle Predictor</h2>
         <p style="color: #64748b; margin-top: 0.5rem;">Turn any current affairs topic into 10 exam-style questions</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Brief value props (compact)
-    st.markdown("""
-    <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-bottom: 2rem;">
-        <div style="text-align: center;">
-            <span style="font-size: 1.5rem;">🔀</span>
-            <p style="margin: 0.25rem 0 0 0; font-size: 0.85rem; color: #64748b;">5 MCQs + 5 Mains</p>
-        </div>
-        <div style="text-align: center;">
-            <span style="font-size: 1.5rem;">🪤</span>
-            <p style="margin: 0.25rem 0 0 0; font-size: 0.85rem; color: #64748b;">Real UPSC Traps</p>
-        </div>
-        <div style="text-align: center;">
-            <span style="font-size: 1.5rem;">₹12</span>
-            <p style="margin: 0.25rem 0 0 0; font-size: 0.85rem; color: #64748b;">Per Query</p>
-        </div>
     </div>
     """, unsafe_allow_html=True)
     
