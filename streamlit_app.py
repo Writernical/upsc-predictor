@@ -294,7 +294,7 @@ def calculate_credits_from_amount(amount_paise: int) -> int:
     return max(0, credits)
 
 
-def check_and_credit_pending_payments(email: str, debug: bool = False) -> int:
+def check_and_credit_pending_payments(email: str) -> int:
     """Check Razorpay for recent payments by email and credit if not processed."""
     try:
         key_id = st.secrets["RAZORPAY_KEY_ID"]
@@ -313,17 +313,11 @@ def check_and_credit_pending_payments(email: str, debug: bool = False) -> int:
         )
         
         if response.status_code != 200:
-            if debug:
-                st.error(f"Razorpay API error: {response.status_code}")
             return 0
         
         payments = response.json().get('items', [])
         credits_added = 0
         email_lower = email.lower().strip()
-        
-        if debug:
-            st.info(f"Searching for: {email_lower}")
-            st.info(f"Found {len(payments)} recent payments")
         
         for payment in payments:
             # Get email from ALL possible fields (Payment Pages store differently)
@@ -335,14 +329,6 @@ def check_and_credit_pending_payments(email: str, debug: bool = False) -> int:
             contact_email = ''
             if payment.get('contact') and '@' in str(payment.get('contact', '')):
                 contact_email = payment.get('contact', '').lower().strip()
-            
-            # Debug: show what emails we found
-            if debug:
-                payment_id = payment.get('id', '')[:20]
-                status = payment.get('status', '')
-                amount = payment.get('amount', 0) / 100
-                st.write(f"Payment {payment_id}... | Status: {status} | ₹{amount}")
-                st.write(f"  → email: '{payment_email}' | notes.email: '{notes_email}'")
             
             # Check any email field matches
             email_matches = (
@@ -359,9 +345,6 @@ def check_and_credit_pending_payments(email: str, debug: bool = False) -> int:
             valid_status = status in ['captured', 'authorized']
             
             if email_matches and valid_status:
-                if debug:
-                    st.success(f"✓ Match found! Payment: {payment_id}")
-                
                 # Check if already processed
                 if not is_payment_processed(payment_id):
                     # Calculate credits based on amount
@@ -371,15 +354,9 @@ def check_and_credit_pending_payments(email: str, debug: bool = False) -> int:
                         if record_payment(payment_id, email):
                             add_paid_credits(email, credits_to_add)
                             credits_added += credits_to_add
-                            if debug:
-                                st.success(f"Added {credits_to_add} credits!")
-                elif debug:
-                    st.warning(f"Payment {payment_id} already processed")
         
         return credits_added
-    except Exception as e:
-        if debug:
-            st.error(f"Error: {str(e)}")
+    except Exception:
         return 0
 
 
@@ -716,9 +693,6 @@ def show_email_entry():
                 key="quick_email_input"
             )
             
-            # Debug mode toggle
-            debug_mode = st.checkbox("🔍 Debug mode (show payment details)", value=False, key="debug_quick")
-            
             col_q1, col_q2 = st.columns(2)
             with col_q1:
                 if st.button("🔓 Login", use_container_width=True, type="primary"):
@@ -727,16 +701,11 @@ def show_email_entry():
                     else:
                         email = quick_email.lower().strip()
                         
-                        # Check for pending payments FIRST (with debug if enabled)
-                        pending = check_and_credit_pending_payments(email, debug=debug_mode)
+                        # Check for pending payments
+                        pending = check_and_credit_pending_payments(email)
                         
                         # Get user (may have been created by check_and_credit_pending_payments)
                         user = get_user_by_email(email)
-                        
-                        if debug_mode:
-                            st.write(f"DEBUG: pending={pending}, user exists={user is not None}")
-                            if user:
-                                st.write(f"DEBUG: user paid_credits={user.get('paid_credits', 0)}")
                         
                         if pending > 0:
                             # New payment found and credited!
