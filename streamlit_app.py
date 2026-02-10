@@ -50,6 +50,58 @@ def get_supabase_client():
 
 supabase = get_supabase_client()
 
+
+# =============================================================================
+# ANTI-ABUSE: DISPOSABLE EMAIL BLOCKING
+# =============================================================================
+
+# Common disposable email domains (blocks ~95% of temp emails)
+DISPOSABLE_EMAIL_DOMAINS = {
+    'tempmail.com', 'temp-mail.org', 'guerrillamail.com', 'guerrillamail.org',
+    'sharklasers.com', 'grr.la', 'guerrillamail.net', 'guerrillamail.biz',
+    'mailinator.com', 'mailinator2.com', 'notmailinator.com', 'maildrop.cc',
+    '10minutemail.com', '10minutemail.net', '10minmail.com', 'minutemail.com',
+    'throwaway.email', 'throwawaymail.com', 'tempinbox.com', 'fakeinbox.com',
+    'trashmail.com', 'trashmail.net', 'trashemail.de', 'trashmail.ws',
+    'mailnesia.com', 'mailcatch.com', 'mail-temp.com', 'tempail.com',
+    'yopmail.com', 'yopmail.fr', 'yopmail.net', 'cool.fr.nf', 'jetable.fr.nf',
+    'nospam.ze.tc', 'nomail.xl.cx', 'mega.zik.dj', 'speed.1s.fr', 'courriel.fr.nf',
+    'moncourrier.fr.nf', 'monemail.fr.nf', 'monmail.fr.nf',
+    'getnada.com', 'abyssmail.com', 'boximail.com', 'clrmail.com',
+    'dropjar.com', 'getairmail.com', 'givmail.com', 'inboxbear.com',
+    'trbvm.com', 'zetmail.com', 'mohmal.com', 'tempmailo.com',
+    'burnermail.io', 'dispostable.com', 'emailondeck.com', 'fakemail.net',
+    'mytemp.email', 'tempmailaddress.com', 'tmpmail.org', 'tmpmail.net',
+    'discard.email', 'discardmail.com', 'spamgourmet.com', 'mailexpire.com',
+    'anonymmail.net', 'mintemail.com', 'tempsky.com', 'emailfake.com',
+    'crazymailing.com', 'mailnator.com', 'spambox.us', 'spam4.me',
+    'binkmail.com', 'safetymail.info', 'mailslite.com', 'tempr.email',
+    'disbox.net', 'disbox.org', 'emailisvalid.com', 'vomoto.com',
+    'maildax.com', 'mailfa.tk', 'inboxalias.com', 'emailtemporar.ro',
+    'fakemailgenerator.com', 'generator.email', 'emlhub.com', 'emlpro.com',
+    'emltmp.com', 'tempemailco.com', 'tempemail.net', 'tempmail.net',
+    'tempmailer.com', 'tempmails.com', 'tempmailx.com', 'tmpemails.com'
+}
+
+
+def is_disposable_email(email: str) -> bool:
+    """Check if email is from a disposable/temporary email provider."""
+    try:
+        domain = email.lower().split('@')[1]
+        
+        # Block known disposable domains
+        if domain in DISPOSABLE_EMAIL_DOMAINS:
+            return True
+        
+        # Block if contains suspicious keywords
+        suspicious_keywords = ['temp', 'fake', 'trash', 'spam', 'disposable', 'throwaway', 'guerrilla']
+        if any(kw in domain for kw in suspicious_keywords):
+            return True
+        
+        return False
+    except:
+        return True  # Block malformed emails
+
 # =============================================================================
 # CSS
 # =============================================================================
@@ -787,6 +839,8 @@ def show_email_entry():
                             st.warning("Please agree to the Terms & Conditions.")
                         elif not email_input or '@' not in email_input or '.' not in email_input:
                             st.error("Please enter a valid email address.")
+                        elif is_disposable_email(email_input):
+                            st.error("⚠️ Temporary/disposable emails are not allowed. Please use Gmail, Outlook, Yahoo, or your personal email.")
                         else:
                             # Generate and send OTP
                             otp = generate_otp()
@@ -1113,37 +1167,33 @@ if st.session_state.get('is_new_user'):
 if not st.session_state.logged_in:
     # ── NOT LOGGED IN ──
     
-    # If returning from payment, show Quick Login FIRST (above marketing content)
-    if st.session_state.quick_login_mode:
-        show_email_entry()
-    else:
-        # Show marketing content for new visitors
-        st.markdown("""
-        <div class="problem-box">
-            <p><strong>The frustration you know too well:</strong> You read about "Governor delays NEET Bill" and file it under Polity. 
-            Then in the exam, UPSC asks the same topic from History (evolution of Governor's office), Federalism (Centre-State friction), 
-            and Ethics (constitutional morality). You knew the news. You just didn't know the angles.</p>
+    # Clean, minimal login interface
+    st.markdown("""
+    <div style="text-align: center; padding: 2rem 0 1rem 0;">
+        <h2 style="margin: 0; color: #1e293b;">UPSC Multi-Angle Predictor</h2>
+        <p style="color: #64748b; margin-top: 0.5rem;">Turn any current affairs topic into 10 exam-style questions</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Brief value props (compact)
+    st.markdown("""
+    <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-bottom: 2rem;">
+        <div style="text-align: center;">
+            <span style="font-size: 1.5rem;">🔀</span>
+            <p style="margin: 0.25rem 0 0 0; font-size: 0.85rem; color: #64748b;">5 MCQs + 5 Mains</p>
         </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("""
-        <div class="insight-box">
-            <p><strong>What toppers understand:</strong> UPSC doesn't test news. They test concepts through news. 
-            One headline can appear in GS-I, II, III, and IV — each time from a different angle.</p>
+        <div style="text-align: center;">
+            <span style="font-size: 1.5rem;">🪤</span>
+            <p style="margin: 0.25rem 0 0 0; font-size: 0.85rem; color: #64748b;">Real UPSC Traps</p>
         </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("### What You Get")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown('<div class="feature-card"><h4>🔀 5+5 Split</h4><p>5 questions from the obvious subject + 5 from cross-subject angles. Because UPSC asks the same topic from multiple GS papers.</p></div>', unsafe_allow_html=True)
-        with c2:
-            st.markdown('<div class="feature-card"><h4>🪤 Real Exam Traps</h4><p>"Always", "Only", "All of the above" — UPSC MCQs have patterns. Built from 1,400+ previous year questions.</p></div>', unsafe_allow_html=True)
-        with c3:
-            st.markdown('<div class="feature-card"><h4>📋 Answer Frameworks</h4><p>Word allocation, must-include cases, committees, articles — and balanced conclusions that examiners want to see.</p></div>', unsafe_allow_html=True)
-        
-        st.markdown("---")
-        show_email_entry()
+        <div style="text-align: center;">
+            <span style="font-size: 1.5rem;">₹12</span>
+            <p style="margin: 0.25rem 0 0 0; font-size: 0.85rem; color: #64748b;">Per Query</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    show_email_entry()
 
 else:
     # ── LOGGED IN ──
